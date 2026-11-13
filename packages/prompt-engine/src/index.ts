@@ -1,93 +1,27 @@
-import type {
-  EnhanceRequest,
-  EnhanceResponse,
-  TaskCategory,
-  TargetAgent
-} from '@promptpilot/shared';
+import type { EnhanceRequest, EnhanceResponse, TargetAgent } from '@promptpilot/shared';
 import { getProfileById } from './profiles.js';
+import {
+  AGENT_NOTES,
+  PLAYBOOKS,
+  expandVagueTerms,
+  extractFilePaths,
+  inferTaskCategory,
+  isAmbiguous,
+  parseInlineInstructions,
+  rankCategories
+} from './rules.js';
 
 export * from './profiles.js';
 export * from './byok.js';
-
-const CATEGORY_KEYWORDS: ReadonlyArray<[TaskCategory, RegExp]> = [
-  ['ui_ux', /\b(ui|ux|design|layout|responsive|css|tailwind|theme|style|look)\b/i],
-  ['bug_fix', /\b(fix|bug|broken|issue|error|crash|fail)\b/i],
-  ['debugging', /\b(debug|trace|inspect|investigate|stack)\b/i],
-  ['auth', /\b(auth|login|signup|register|session|jwt|oauth|password)\b/i],
-  ['security', /\b(security|xss|csrf|ssrf|injection|sanitize|vulnerability)\b/i],
-  ['performance', /\b(performance|slow|optimize|latency|bundle|memory|cache)\b/i],
-  ['refactoring', /\b(refactor|clean|simplify|restructure|extract)\b/i],
-  ['database', /\b(db|database|sql|postgres|prisma|drizzle|schema|migration)\b/i],
-  ['api', /\b(api|endpoint|rest|route|webhook|server)\b/i],
-  ['testing', /\b(test|unit|integration|e2e|coverage|spec)\b/i],
-  ['documentation', /\b(doc|readme|comment|guide|docs)\b/i],
-  ['architecture', /\b(architect|monorepo|structure|design doc|system)\b/i]
-];
-
-const CATEGORY_GUIDANCE: Record<TaskCategory, string[]> = {
-  ui_ux: [
-    'Analyze the existing component hierarchy and styling conventions before editing.',
-    'Ensure responsive behavior across desktop, tablet, and mobile viewports.',
-    'Reuse existing UI components and design tokens wherever possible.'
-  ],
-  feature: [
-    'Review existing modules and conventions to integrate the feature cleanly.',
-    'Handle loading, empty, and error states explicitly.'
-  ],
-  bug_fix: [
-    'Reproduce and identify the root cause before applying a fix.',
-    'Keep changes focused on the root cause without unrelated refactoring.'
-  ],
-  debugging: [
-    'Trace the failing execution path and state transitions systematically.',
-    'Report the confirmed root cause and verification steps.'
-  ],
-  refactoring: [
-    'Preserve all existing external behavior, interfaces, and tests.',
-    'Remove duplication and simplify control flow without adding unnecessary abstractions.'
-  ],
-  performance: [
-    'Measure or identify the bottleneck before optimizing.',
-    'Avoid premature complexity and verify behavior remains unchanged.'
-  ],
-  database: [
-    'Ensure schema changes are normalized, indexed appropriately, and safe for existing data.',
-    'Keep queries parameterized and handle migration edge cases.'
-  ],
-  api: [
-    'Validate request inputs, enforce auth/authorization, and return consistent error shapes.',
-    'Preserve backwards compatibility for existing callers.'
-  ],
-  auth: [
-    'Follow secure credential, session, and token handling practices.',
-    'Never expose secrets, tokens, or sensitive user data in logs or client responses.'
-  ],
-  security: [
-    'Audit trust boundaries, input validation, and secret handling.',
-    'Avoid weakening existing security checks.'
-  ],
-  testing: [
-    'Cover primary success paths, edge cases, and failure modes.',
-    'Keep tests deterministic and isolated from external state.'
-  ],
-  documentation: [
-    'Keep documentation accurate, concise, and aligned with the actual codebase.',
-    'Avoid documenting unimplemented behavior as available.'
-  ],
-  architecture: [
-    'Evaluate trade-offs, module boundaries, and long-term maintainability.',
-    'Keep the structure minimal and aligned with project conventions.'
-  ]
-};
-
-export function inferTaskCategory(prompt: string): TaskCategory {
-  for (const [category, pattern] of CATEGORY_KEYWORDS) {
-    if (pattern.test(prompt)) {
-      return category;
-    }
-  }
-  return 'feature';
-}
+export {
+  PLAYBOOKS,
+  buildMetaSystemPrompt,
+  cleanAiOutput,
+  expandVagueTerms,
+  inferTaskCategory,
+  parseInlineInstructions,
+  rankCategories
+} from './rules.js';
 
 function cleanSentence(input: string): string {
   const trimmed = input.trim().replace(/\s+/g, ' ');
@@ -96,18 +30,9 @@ function cleanSentence(input: string): string {
   return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
 }
 
-export function parseInlineInstructions(raw: string): {
-  prompt: string;
-  inlineInstructions: string;
-} {
-  const match = raw.match(/\/\/\/([\s\S]*?)\/\/\//);
-  if (!match) {
-    return { prompt: raw.trim(), inlineInstructions: '' };
-  }
-  const inlineInstructions = (match[1] ?? '').trim();
-  const prompt = raw.replace(match[0], '').trim();
-  return { prompt, inlineInstructions };
-}
+const bullets = (lines: string[]) => lines.map((l) => `- ${l}`).join('\n');
+const numbered = (lines: string[]) => lines.map((l, i) => `${i + 1}. ${l}`).join('\n');
+const unique = (lines: string[]) => Array.from(new Set(lines.filter(Boolean)));
 
 export function enhancePromptRuleBased(request: EnhanceRequest): EnhanceResponse {
   const parsed = parseInlineInstructions(request.originalPrompt);
@@ -117,71 +42,83 @@ export function enhancePromptRuleBased(request: EnhanceRequest): EnhanceResponse
   }
 
   const profile = getProfileById(request.profileId);
+  const ranked = rankCategories(original);
   const category = request.category ?? profile?.category ?? inferTaskCategory(original);
+  const playbook = PLAYBOOKS[category];
+  // A secondary domain (e.g. auth inside a bug fix) contributes its pitfalls too.
+  const secondary = ranked.find((c) => c !== category);
   const targetAgent: TargetAgent = request.targetAgent ?? 'generic';
-  const cleanedObjective = cleanSentence(original);
-  const extra = [request.additionalInstructions?.trim(), parsed.inlineInstructions]
-    .filter(Boolean)
-    .join(' ');
-  const activeSaved = (request.savedInstructions ?? [])
+
+  const directives = unique(
+    [parsed.inlineInstructions, request.additionalInstructions?.trim() ?? '']
+      .flatMap((block) => block.split(/\n+/))
+      .map(cleanSentence)
+  );
+  const savedRules = (request.savedInstructions ?? [])
     .filter((item) => item.enabled)
     .map((item) => cleanSentence(item.text))
     .filter(Boolean);
 
-  const guidanceLines = [
-    ...(profile ? [profile.systemGuidance] : []),
-    ...CATEGORY_GUIDANCE[category]
-  ];
+  const sections: string[] = [];
 
-  const sections: string[] = [`## Objective\n${cleanedObjective}`];
+  // Objective: the user's words first (never discarded), then the concrete goal.
+  sections.push(`## Objective\n${cleanSentence(original)}\n${playbook.goal}`);
 
+  // Context: what to read before touching code.
+  const contextLines: string[] = [];
+  const files = extractFilePaths(original);
+  if (files.length) contextLines.push(`Start with the files mentioned: ${files.join(', ')}.`);
   const ctx = request.projectContext;
   if (ctx && ctx.mode !== 'none') {
-    const contextLines: string[] = [];
     if (ctx.language || ctx.framework) {
-      contextLines.push(`Stack: ${[ctx.language, ctx.framework].filter(Boolean).join(', ')}`);
+      contextLines.push(`Stack: ${[ctx.language, ctx.framework].filter(Boolean).join(', ')}.`);
     }
     if (ctx.selectedFiles?.length) {
-      contextLines.push(
-        `Included files (${ctx.selectedFiles.length}): ${ctx.selectedFiles.map((f) => f.path).join(', ')}`
+      contextLines.push(`Provided files: ${ctx.selectedFiles.map((f) => f.path).join(', ')}.`);
+    }
+  }
+  contextLines.push(`Before editing, inspect ${playbook.inspectFirst.join(', and ')}.`);
+  if (AGENT_NOTES[targetAgent]) contextLines.push(AGENT_NOTES[targetAgent]);
+  sections.push(`## Context\n${bullets(contextLines)}`);
+
+  // Requirements: the user's own details plus vague words made checkable.
+  const requirements = unique([...directives, ...expandVagueTerms(`${original} ${directives.join(' ')}`)]);
+  if (requirements.length) sections.push(`## Requirements\n${bullets(requirements)}`);
+
+    // Approach: profile guidance leads, then the category playbook.
+    const approach = unique([...(profile ? [profile.systemGuidance] : []), ...playbook.approach]);
+    sections.push(`## Approach\n${numbered(approach)}`);
+
+    const constraints = unique([
+      'Keep all existing functionality, routes, and business logic intact unless the task requires changing them.',
+      'Do not modify unrelated files or add dependencies unless they are necessary.',
+      ...playbook.pitfalls,
+      ...(secondary ? PLAYBOOKS[secondary].pitfalls.slice(0, 1) : []),
+      ...savedRules
+    ]);
+    sections.push(`## Constraints\n${bullets(constraints)}`);
+
+    if (isAmbiguous(original) && !files.length) {
+      sections.push(
+        '## Assumptions\n- The request is brief, so locate the relevant code by searching the codebase first.\n- If several places could match, pick the most likely one and say which you chose. Ask before making broad or destructive changes.'
       );
     }
-    if (contextLines.length) {
-      sections.push(`## Existing Context\n${contextLines.map((line) => `- ${line}`).join('\n')}`);
-    }
-  }
 
-  sections.push(
-    `## Implementation Guidance\n${guidanceLines.map((line) => `- ${line}`).join('\n')}`
-  );
+    sections.push(`## Done when\n${bullets([...playbook.doneWhen, 'The project builds and existing tests pass.'])}`);
+    sections.push('## Report back\nSummarize what you changed and why (file by file), how you verified it, and anything left unresolved.');
 
-  if (extra) {
-    sections.push(`## Additional Instructions\n${cleanSentence(extra)}`);
-  }
-
-  const constraints = [
-    'Preserve all existing functionality, routes, and business logic unless explicitly asked to change them.',
-    'Avoid modifying unrelated files or introducing unnecessary dependencies.',
-    ...activeSaved
-  ];
-  sections.push(`## Constraints\n${constraints.map((line) => `- ${line}`).join('\n')}`);
-
-  sections.push(
-    '## Verification\n- Verify the project builds and passes relevant typechecks/tests.\n- Summarize the files changed and any remaining gaps.'
-  );
-
-  return {
-    originalPrompt: request.originalPrompt,
-    enhancedPrompt: sections.join('\n\n'),
-    mode: 'free',
-    category,
-    targetAgent,
-    assumptions: [
-      `Inferred task category: ${category}`,
-      `Formatted for target agent: ${targetAgent}`
-    ],
-    disclaimer:
-      'Generated locally using PromptPilot Free Rule-Based mode (no AI inference or automatic codebase inspection).'
+    return {
+      originalPrompt: request.originalPrompt,
+      enhancedPrompt: sections.join('\n\n'),
+      mode: 'free',
+      category,
+      targetAgent,
+      assumptions: [
+        `Inferred task category: ${playbook.label}`,
+        ...(secondary ? [`Secondary domain: ${PLAYBOOKS[secondary].label}`] : []),
+        `Formatted for target agent: ${targetAgent}`
+      ],
+      disclaimer:
+      'Generated locally by the free rule-based engine. It structures your request with proven templates; it does not read your code or use AI.'
   };
-}
-
+  }

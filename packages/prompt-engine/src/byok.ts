@@ -1,5 +1,14 @@
 import type { EnhanceRequest, EnhanceResponse, TargetAgent } from '@promptpilot/shared';
 import { getProfileById } from './profiles.js';
+import {
+  AGENT_NOTES,
+  PLAYBOOKS,
+  buildMetaSystemPrompt,
+  cleanAiOutput,
+  expandVagueTerms,
+  inferTaskCategory,
+  parseInlineInstructions
+} from './rules.js';
 
 export type ByokProviderId =
   | 'openrouter'
@@ -152,46 +161,24 @@ export function validateExternalBaseUrl(rawUrl: string): string {
   return parsed.toString().replace(/\/+$/, '');
 }
 
-function buildSystemPrompt(request: EnhanceRequest): string {
+function buildUserPrompt(request: EnhanceRequest): string {
+  const parsed = parseInlineInstructions(request.originalPrompt);
   const profile = getProfileById(request.profileId);
   const agent: TargetAgent = request.targetAgent ?? 'generic';
+  const category = request.category ?? profile?.category ?? inferTaskCategory(parsed.prompt);
+  const playbook = PLAYBOOKS[category];
+
+  const enhancerDirectives = [parsed.inlineInstructions, request.additionalInstructions?.trim()]
+    .filter(Boolean)
+    .join('\n');
   const saved = (request.savedInstructions ?? [])
     .filter((i) => i.enabled)
     .map((i) => `- ${i.text}`)
     .join('\n');
+  const vagueExpansions = expandVagueTerms(`${parsed.prompt} ${enhancerDirectives}`);
 
-  return [
-    'You are PromptPilot, a senior software engineering prompt enhancer.',
-    'Transform the user instruction into a clear, structured, implementation-ready prompt for an AI coding agent.',
-    'Rules: preserve the user intent, do not invent unrelated requirements, avoid fluff, and keep sections concise.',
-    `Target coding agent: ${agent}.`,
-    profile ? `Active profile (${profile.name}): ${profile.systemGuidance}` : '',
-    saved ? `User saved instructions:\n${saved}` : ''
-  ]
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-export function parseInlineInstructionsForByok(raw: string): {
-  prompt: string;
-  inlineInstructions: string;
-} {
-  const match = raw.match(/\/\/\/([\s\S]*?)\/\/\//);
-  if (!match) return { prompt: raw.trim(), inlineInstructions: '' };
-  return {
-    prompt: raw.replace(match[0], '').trim(),
-    inlineInstructions: (match[1] ?? '').trim()
-  };
-}
-
-function buildUserPrompt(request: EnhanceRequest): string {
-  const parsed = parseInlineInstructionsForByok(request.originalPrompt);
-  const enhancerDirectives = [parsed.inlineInstructions, request.additionalInstructions?.trim()]
-    .filter(Boolean)
-    .join('\n');
   const ctx = request.projectContext;
   const contextParts: string[] = [];
-
   if (ctx && ctx.mode !== 'none') {
     if (ctx.framework || ctx.language) {
       contextParts.push(
@@ -209,16 +196,32 @@ function buildUserPrompt(request: EnhanceRequest): string {
     }
   }
 
-  return [
-    `Original prompt for the building AI:\n${parsed.prompt}`,
-    enhancerDirectives
-      ? `Instructions for YOU (how to enhance the prompt above — do not copy these literally as a separate feature unless relevant):\n${enhancerDirectives}`
-      : '',
-    contextParts.length ? `Project context:\n${contextParts.join('\n\n')}` : '',
-    'Return only the enhanced prompt in clean Markdown with Objective, Requirements/Guidance, Constraints, and Verification sections where appropriate.'
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  const parts: string[] = [
+    `<building_prompt>\n${parsed.prompt}\n</building_prompt>`
+  ];
+  if (enhancerDirectives) {
+    parts.push(`<enhancer_instructions>\n${enhancerDirectives}\n</enhancer_instructions>`);
+  }
+  if (profile) {
+    parts.push(`<profile name="${profile.name}">\n${profile.systemGuidance}\n</profile>`);
+  }
+  if (saved) {
+    parts.push(`<saved_preferences>\n${saved}\n</saved_preferences>`);
+  }
+  if (AGENT_NOTES[agent]) {
+    parts.push(`<target_agent name="${agent}">\n${AGENT_NOTES[agent]}\n</target_agent>`);
+  }
+  if (playbook) {
+    parts.push(`<domain_checklist category="${playbook.label}">\nGoal: ${playbook.goal}\nInspect first: ${playbook.inspectFirst.join('; ')}\nApproach: ${playbook.approach.join(' → ')}\nDone when: ${playbook.doneWhen.join('; ')}\nPitfalls: ${playbook.pitfalls.join('; ')}\n</domain_checklist>`);
+  }
+  if (vagueExpansions.length) {
+    parts.push(`<vague_term_expansions>\n${vagueExpansions.map((v) => `- ${v}`).join('\n')}\n</vague_term_expansions>`);
+  }
+  if (contextParts.length) {
+    parts.push(`<project_context>\n${contextParts.join('\n\n')}\n</project_context>`);
+  }
+
+  return parts.join('\n\n');
 }
 
 async function readErrorMessage(res: Response): Promise<string> {
@@ -434,7 +437,9 @@ export async function enhancePromptWithByok(
   const profile = getProfileById(request.profileId);
   const category = request.category ?? profile?.category ?? 'feature';
   const targetAgent: TargetAgent = request.targetAgent ?? 'generic';
-  const enhancedPrompt = await callProvider(config, buildSystemPrompt(request), buildUserPrompt(request));
+  const enhancedPrompt = cleanAiOutput(
+    await callProvider(config, buildMetaSystemPrompt(), buildUserPrompt(request))
+  );
 
   return {
     originalPrompt: request.originalPrompt,
