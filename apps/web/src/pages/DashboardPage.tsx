@@ -272,12 +272,20 @@ export function DashboardPage() {
             Signed in as {session.user.email}
           </p>
         </div>
-        <Link
-          to="/enhance"
-          className="px-4 py-2 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500"
-        >
-          Open Enhancer
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            to="/keys"
+            className="px-3.5 py-2 rounded border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium"
+          >
+            API Keys Tab
+          </Link>
+          <Link
+            to="/enhance"
+            className="px-4 py-2 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500"
+          >
+            Open Enhancer
+          </Link>
+        </div>
       </div>
 
       <div className="grid sm:grid-cols-3 gap-4 text-sm">

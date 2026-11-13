@@ -23,6 +23,7 @@ export function Layout() {
   const navLinks = [
     { to: '/', label: 'Home' },
     { to: '/enhance', label: 'Enhancer' },
+    { to: '/keys', label: 'API Keys' },
     { to: '/dashboard', label: 'Dashboard' },
     { to: '/install', label: 'Install' }
   ];

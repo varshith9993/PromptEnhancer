@@ -11,6 +11,7 @@ import {
 } from '@promptpilot/prompt-engine';
 import type { EnhanceRequest, PromptProfile, UserInstruction } from '@promptpilot/shared';
 import {
+  checkAllUserApiKeys,
   createUserAccessToken,
   deleteUserApiKey,
   fetchUserAccessTokens,
@@ -24,6 +25,7 @@ import {
   replaceUserPreferences,
   revokeUserAccessToken,
   saveUserApiKey,
+  toggleApiKeyStatus,
   verifySupabaseUser
 } from './supabase-auth.js';
 
@@ -162,22 +164,27 @@ export async function handleRequest(
         }
 
         if (keyConfig && resolvedProvider) {
-          const providerId = resolvedProvider as ByokProviderId;
-          const result = await enhancePromptWithByok(
-            { ...parsed, originalPrompt: parsed.originalPrompt, mode: 'byok' },
-            {
-              providerId,
-              apiKey: keyConfig.apiKey,
-              ...(keyConfig.modelId ? { modelId: keyConfig.modelId } : {}),
-              ...(keyConfig.baseUrl ? { baseUrl: keyConfig.baseUrl } : {})
-            }
-          );
-          void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category, providerId);
-          sendJson(res, 200, result);
-          return;
+          try {
+            const providerId = resolvedProvider as ByokProviderId;
+            const result = await enhancePromptWithByok(
+              { ...parsed, originalPrompt: parsed.originalPrompt, mode: 'byok' },
+              {
+                providerId,
+                apiKey: keyConfig.apiKey,
+                ...(keyConfig.modelId ? { modelId: keyConfig.modelId } : {}),
+                ...(keyConfig.baseUrl ? { baseUrl: keyConfig.baseUrl } : {})
+              }
+            );
+            void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category, providerId);
+            sendJson(res, 200, result);
+            return;
+          } catch {
+            // AI provider failed: fall through to PromptPilot Rule-Based Engine as the guaranteed last-priority fallback
+          }
         }
       }
 
+      // Last priority fallback: PromptPilot Rule-Based Engine (no key needed, always on)
       const result = enhancePromptRuleBased({
         ...parsed,
         originalPrompt: parsed.originalPrompt,
@@ -303,7 +310,7 @@ export async function handleRequest(
 
   if (
     url?.startsWith('/api/me/keys') &&
-    (method === 'GET' || method === 'PUT' || method === 'DELETE')
+    (method === 'GET' || method === 'PUT' || method === 'PATCH' || method === 'DELETE' || method === 'POST')
   ) {
     const authHeader = req.headers.authorization;
     const user = await verifySupabaseUser(authHeader);
@@ -314,6 +321,21 @@ export async function handleRequest(
     const token = authHeader.slice(7).trim();
 
     try {
+      if (url === '/api/me/keys/check-all' && method === 'POST') {
+        const keys = await checkAllUserApiKeys(user.id);
+        sendJson(res, 200, { ok: true, keys });
+        return;
+      }
+      if (method === 'PATCH') {
+        const body = JSON.parse(await readBody(req)) as { providerId?: string; enabled?: boolean };
+        if (!body.providerId || typeof body.enabled !== 'boolean') {
+          sendJson(res, 400, { error: 'providerId and enabled (boolean) are required' });
+          return;
+        }
+        await toggleApiKeyStatus(user.id, body.providerId, body.enabled);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
       if (method === 'GET') {
         const keys = await fetchUserApiKeys(token, user.id);
         sendJson(res, 200, { keys });

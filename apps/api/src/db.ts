@@ -238,6 +238,35 @@ export function deleteUserApiKey(userId: string, providerId: string): void {
   `).run(userId, providerId);
 }
 
+export function toggleUserApiKey(userId: string, providerId: string, enabled: boolean): void {
+  const db = getDatabase();
+  db.prepare(`
+    UPDATE user_api_keys SET enabled = ?, updated_at = datetime('now')
+    WHERE user_id = ? AND provider_id = ?
+  `).run(enabled ? 1 : 0, userId, providerId);
+}
+
+export function updateKeyHealthStatus(
+  userId: string,
+  providerId: string,
+  status: 'healthy' | 'invalid' | 'error',
+  lastError?: string,
+  modelId?: string
+): void {
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE user_api_keys SET
+      status = ?,
+      last_checked_at = ?,
+      last_healthy_at = CASE WHEN ? = 'healthy' THEN ? ELSE last_healthy_at END,
+      last_error = ?,
+      model_id = COALESCE(?, model_id),
+      updated_at = ?
+    WHERE user_id = ? AND provider_id = ?
+  `).run(status, now, status, now, lastError || null, modelId || null, now, userId, providerId);
+}
+
 export function getDecryptedApiKey(
   userId: string,
   providerId: string

@@ -1,4 +1,5 @@
 import type { PromptProfile, UserInstruction } from '@promptpilot/shared';
+import { testByokConnection, type ByokProviderId } from '@promptpilot/prompt-engine';
 import {
   deleteUserApiKey as dbDeleteApiKey,
   ensureUser,
@@ -10,6 +11,8 @@ import {
   revokeAccessToken,
   saveAccessToken,
   saveEncryptedApiKey,
+  toggleUserApiKey as dbToggleApiKey,
+  updateKeyHealthStatus,
   verifyLocalAccessToken
 } from './db.js';
 import { generatePromptPilotToken } from './crypto.js';
@@ -219,6 +222,7 @@ export interface StoredKeySummary {
   baseUrl?: string | undefined;
   modelId?: string | undefined;
   status: 'healthy' | 'invalid' | 'error';
+  enabled: boolean;
   lastCheckedAt?: string | undefined;
   lastHealthyAt?: string | undefined;
   lastError?: string | undefined;
@@ -236,11 +240,45 @@ export async function fetchUserApiKeys(
     ...(k.baseUrl ? { baseUrl: k.baseUrl } : {}),
     ...(k.modelId ? { modelId: k.modelId } : {}),
     status: k.status,
+    enabled: k.enabled,
     ...(k.lastCheckedAt ? { lastCheckedAt: k.lastCheckedAt } : {}),
     ...(k.lastHealthyAt ? { lastHealthyAt: k.lastHealthyAt } : {}),
     ...(k.lastError ? { lastError: k.lastError } : {}),
     updatedAt: k.updatedAt
   }));
+}
+
+export async function toggleApiKeyStatus(
+  userId: string,
+  providerId: string,
+  enabled: boolean
+): Promise<void> {
+  dbToggleApiKey(userId, providerId, enabled);
+}
+
+export async function checkAllUserApiKeys(userId: string): Promise<StoredKeySummary[]> {
+  const keys = listUserApiKeys(userId);
+  for (const k of keys) {
+    const full = getDecryptedApiKey(userId, k.providerId);
+    if (!full) continue;
+    try {
+      const res = await testByokConnection({
+        providerId: k.providerId as ByokProviderId,
+        apiKey: full.apiKey,
+        ...(full.baseUrl ? { baseUrl: full.baseUrl } : {}),
+        ...(full.modelId ? { modelId: full.modelId } : {})
+      });
+      updateKeyHealthStatus(userId, k.providerId, 'healthy', undefined, res.model);
+    } catch (err) {
+      updateKeyHealthStatus(
+        userId,
+        k.providerId,
+        'error',
+        err instanceof Error ? err.message : 'Connection failed'
+      );
+    }
+  }
+  return fetchUserApiKeys('', userId);
 }
 
 export async function saveUserApiKey(

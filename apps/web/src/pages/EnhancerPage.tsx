@@ -437,10 +437,10 @@ export function EnhancerPage() {
             </span>
           </div>
           <Link
-            to="/dashboard"
+            to="/keys"
             className="px-2.5 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-500 font-medium shrink-0"
           >
-            Manage Keys
+            API Keys &amp; Providers
           </Link>
         </div>
       )}
