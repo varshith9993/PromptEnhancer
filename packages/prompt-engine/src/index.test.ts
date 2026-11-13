@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   enhancePromptRuleBased,
+  enhancePromptWithFallback,
   inferTaskCategory,
   parseInlineInstructions,
   validateExternalBaseUrl
@@ -47,4 +48,36 @@ test('validateExternalBaseUrl blocks private/http URLs and allows https', () => 
 
 test('enhancePromptRuleBased rejects empty prompt', () => {
   assert.throws(() => enhancePromptRuleBased({ originalPrompt: '   ', mode: 'free' }));
+});
+
+test('enhancePromptWithFallback skips failing provider and succeeds on next', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 });
+    }
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: '## Objective\nFallback worked.' } }] }),
+      { status: 200 }
+    );
+  }) as typeof fetch;
+
+  try {
+    const res = await enhancePromptWithFallback(
+      { originalPrompt: 'Fix auth', mode: 'byok' },
+      [
+        { providerId: 'groq', apiKey: 'k1' },
+        { providerId: 'pollinations', apiKey: '' }
+      ]
+    );
+    assert.equal(res.usedProvider, 'pollinations');
+    assert.equal(res.attempts.length, 2);
+    assert.equal(res.attempts[0]?.ok, false);
+    assert.equal(res.attempts[1]?.ok, true);
+    assert.match(res.response.enhancedPrompt, /Fallback worked/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

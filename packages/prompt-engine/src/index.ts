@@ -133,10 +133,27 @@ export function enhancePromptRuleBased(request: EnhanceRequest): EnhanceResponse
     ...CATEGORY_GUIDANCE[category]
   ];
 
-  const sections: string[] = [
-    `## Objective\n${cleanedObjective}`,
+  const sections: string[] = [`## Objective\n${cleanedObjective}`];
+
+  const ctx = request.projectContext;
+  if (ctx && ctx.mode !== 'none') {
+    const contextLines: string[] = [];
+    if (ctx.language || ctx.framework) {
+      contextLines.push(`Stack: ${[ctx.language, ctx.framework].filter(Boolean).join(', ')}`);
+    }
+    if (ctx.selectedFiles?.length) {
+      contextLines.push(
+        `Included files (${ctx.selectedFiles.length}): ${ctx.selectedFiles.map((f) => f.path).join(', ')}`
+      );
+    }
+    if (contextLines.length) {
+      sections.push(`## Existing Context\n${contextLines.map((line) => `- ${line}`).join('\n')}`);
+    }
+  }
+
+  sections.push(
     `## Implementation Guidance\n${guidanceLines.map((line) => `- ${line}`).join('\n')}`
-  ];
+  );
 
   if (extra) {
     sections.push(`## Additional Instructions\n${cleanSentence(extra)}`);

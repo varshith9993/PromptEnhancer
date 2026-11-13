@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { DashboardPage } from './pages/DashboardPage';
 import { EnhancerPage } from './pages/EnhancerPage';
 import { HomePage } from './pages/HomePage';
 import { InstallPage } from './pages/InstallPage';
@@ -12,6 +13,7 @@ export function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/enhance" element={<EnhancerPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/install" element={<InstallPage />} />
           <Route path="/login" element={<LoginPage />} />
         </Route>

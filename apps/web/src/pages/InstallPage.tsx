@@ -42,10 +42,18 @@ export function InstallPage() {
       ? `git clone <your-repo-url> PromptEnhancer\ncd PromptEnhancer\nnpm install\nnpm run build\nnode apps/cli/dist/index.js enhance "Change the UI look"`
       : `git clone <your-repo-url> PromptEnhancer\ncd PromptEnhancer\nnpm install\nnpm run build\nnode apps/cli/dist/index.js enhance "Change the UI look"`;
 
-  const byokCmd =
-    os === 'windows'
-      ? `$env:PROMPTPILOT_API_KEY="paste-your-key-here"\nnode apps/cli/dist/index.js enhance "Fix the login page" --mode byok --provider openrouter`
-      : `export PROMPTPILOT_API_KEY="paste-your-key-here"\nnode apps/cli/dist/index.js enhance "Fix the login page" --mode byok --provider openrouter`;
+  const editorCmd =
+    editor === 'claude-code'
+      ? os === 'windows'
+        ? `mkdir -Force "$HOME\\.claude\\commands"\nCopy-Item integrations\\claude-code\\promptpilot-enhance.md "$HOME\\.claude\\commands\\promptpilot-enhance.md"\n# Then in Claude Code run:\n# /promptpilot-enhance Change the UI look ///Make it minimal///`
+        : `mkdir -p ~/.claude/commands\ncp integrations/claude-code/promptpilot-enhance.md ~/.claude/commands/promptpilot-enhance.md\n# Then in Claude Code run:\n# /promptpilot-enhance Change the UI look ///Make it minimal///`
+      : editor === 'antigravity'
+        ? os === 'windows'
+          ? `mkdir -Force "$HOME\\.gemini\\config\\skills\\promptpilot-enhance"\nCopy-Item integrations\\antigravity\\promptpilot-enhance\\SKILL.md "$HOME\\.gemini\\config\\skills\\promptpilot-enhance\\SKILL.md"`
+          : `mkdir -p ~/.gemini/config/skills/promptpilot-enhance\ncp integrations/antigravity/promptpilot-enhance/SKILL.md ~/.gemini/config/skills/promptpilot-enhance/SKILL.md`
+        : os === 'windows'
+          ? `. .\\integrations\\generic\\PromptPilot.ps1\nenhance "Change the UI look ///Make it minimal///"`
+          : `source ./integrations/generic/promptpilot.sh\nenhance "Change the UI look ///Make it minimal///"`;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 space-y-8">
@@ -122,9 +130,9 @@ export function InstallPage() {
 
         <div className="space-y-2">
           <h3 className="font-medium text-xs uppercase tracking-wider text-zinc-500">
-            3. Run BYOK Mode in Terminal
+            3. Activate {selected.name} (/enhance &amp; ///...///)
           </h3>
-          <CopyBlock code={byokCmd} />
+          <CopyBlock code={editorCmd} />
         </div>
 
         <div className="space-y-2">

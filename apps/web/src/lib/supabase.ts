@@ -8,14 +8,31 @@ export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 export const supabase: SupabaseClient | null =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-export async function signInWithGoogle(): Promise<void> {
+export async function signInWithOAuthProvider(provider: 'google' | 'github'): Promise<void> {
   if (!supabase) {
     throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
   }
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
+    provider,
     options: {
       redirectTo: `${window.location.origin}/enhance`
+    }
+  });
+  if (error) throw error;
+}
+
+export async function signInWithEmailLink(email: string): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
+  }
+  const trimmed = email.trim();
+  if (!trimmed) {
+    throw new Error('Enter a valid email address.');
+  }
+  const { error } = await supabase.auth.signInWithOtp({
+    email: trimmed,
+    options: {
+      emailRedirectTo: `${window.location.origin}/enhance`
     }
   });
   if (error) throw error;
@@ -28,4 +45,3 @@ export async function signOutUser(): Promise<void> {
 }
 
 export type AuthSession = Session | null;
-

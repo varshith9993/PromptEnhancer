@@ -100,11 +100,14 @@ export function createServer(): http.Server {
       try {
         const raw = await readBody(req);
         const config = JSON.parse(raw) as Partial<ByokConfig>;
-        if (!config.providerId || !config.apiKey) {
-          sendJson(res, 400, { error: 'providerId and apiKey are required' });
+        if (!config.providerId) {
+          sendJson(res, 400, { error: 'providerId is required' });
           return;
         }
-        const result = await testByokConnection(config as ByokConfig);
+        const result = await testByokConnection({
+          ...(config as ByokConfig),
+          apiKey: config.apiKey ?? ''
+        });
         sendJson(res, 200, result);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Connection failed';
@@ -120,13 +123,13 @@ export function createServer(): http.Server {
           request?: Partial<EnhanceRequest>;
           byok?: Partial<ByokConfig>;
         };
-        if (!body.request?.originalPrompt || !body.byok?.providerId || !body.byok?.apiKey) {
-          sendJson(res, 400, { error: 'originalPrompt, providerId, and apiKey are required' });
+        if (!body.request?.originalPrompt || !body.byok?.providerId) {
+          sendJson(res, 400, { error: 'originalPrompt and providerId are required' });
           return;
         }
         const result = await enhancePromptWithByok(
           { ...body.request, originalPrompt: body.request.originalPrompt, mode: 'byok' },
-          body.byok as ByokConfig
+          { ...(body.byok as ByokConfig), apiKey: body.byok.apiKey ?? '' }
         );
         sendJson(res, 200, result);
       } catch (err) {
