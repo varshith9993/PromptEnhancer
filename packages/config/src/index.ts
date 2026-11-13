@@ -63,10 +63,10 @@ export const INTEGRATIONS: readonly IntegrationInfo[] = [
   { id: 'generic', name: 'Generic Terminal / CLI', status: 'beta', summary: 'CLI + PowerShell/Bash enhance helper with clipboard copy' },
   { id: 'claude-code', name: 'Claude Code', status: 'beta', summary: 'Slash command via /promptpilot-enhance' },
   { id: 'antigravity', name: 'Antigravity', status: 'beta', summary: 'Workspace skill promptpilot-enhance' },
-  { id: 'vscode', name: 'VS Code', status: 'planned', summary: 'Editor command & clipboard/selection workflow' },
-  { id: 'cursor', name: 'Cursor', status: 'planned', summary: 'Composer & prompt enhancement integration' },
+  { id: 'vscode', name: 'VS Code', status: 'beta', summary: 'Extension: Cmd+Shift+E or right-click to enhance selected text' },
+  { id: 'cursor', name: 'Cursor', status: 'beta', summary: 'Cursor rules file with /enhance trigger' },
   { id: 'opencode', name: 'OpenCode', status: 'planned', summary: 'CLI and agent workflow integration' },
-  { id: 'gemini-cli', name: 'Gemini CLI', status: 'planned', summary: 'Terminal prompt pre-processor for Gemini CLI' },
-  { id: 'codex-cli', name: 'Codex CLI', status: 'planned', summary: 'Terminal prompt pre-processor for Codex CLI' }
+  { id: 'gemini-cli', name: 'Gemini CLI', status: 'beta', summary: 'Custom skill with /enhance trigger' },
+  { id: 'codex-cli', name: 'Codex CLI', status: 'beta', summary: 'Instructions file with /enhance trigger' }
 ];
 

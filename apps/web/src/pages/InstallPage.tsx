@@ -51,9 +51,21 @@ export function InstallPage() {
         ? os === 'windows'
           ? `mkdir -Force "$HOME\\.gemini\\config\\skills\\promptpilot-enhance"\nCopy-Item integrations\\antigravity\\promptpilot-enhance\\SKILL.md "$HOME\\.gemini\\config\\skills\\promptpilot-enhance\\SKILL.md"`
           : `mkdir -p ~/.gemini/config/skills/promptpilot-enhance\ncp integrations/antigravity/promptpilot-enhance/SKILL.md ~/.gemini/config/skills/promptpilot-enhance/SKILL.md`
-        : os === 'windows'
-          ? `. .\\integrations\\generic\\PromptPilot.ps1\nenhance "Change the UI look ///Make it minimal///"`
-          : `source ./integrations/generic/promptpilot.sh\nenhance "Change the UI look ///Make it minimal///"`;
+        : editor === 'vscode'
+          ? `# Install the VS Code extension:\ncd integrations/vscode\nnpm install\nnpm run build\n# Then open VS Code, select text, and press Ctrl+Shift+E (Cmd+Shift+E on Mac)\n# Or right-click selected text → "PromptPilot: Enhance Prompt"`
+          : editor === 'cursor'
+            ? os === 'windows'
+              ? `mkdir -Force ".cursor\\rules"\nCopy-Item integrations\\cursor\\promptpilot.mdc ".cursor\\rules\\promptpilot.mdc"\n# Then in Cursor chat, type:\n# /enhance Change the UI look ///Make it minimal///`
+              : `mkdir -p .cursor/rules\ncp integrations/cursor/promptpilot.mdc .cursor/rules/promptpilot.mdc\n# Then in Cursor chat, type:\n# /enhance Change the UI look ///Make it minimal///`
+            : editor === 'gemini-cli'
+              ? os === 'windows'
+                ? `mkdir -Force "$HOME\\.gemini\\config\\skills\\promptpilot-enhance"\nCopy-Item integrations\\gemini-cli\\README.md "$HOME\\.gemini\\config\\skills\\promptpilot-enhance\\SKILL.md"\n# Then in Gemini CLI, type:\n# /enhance Change the UI look ///Make it minimal///`
+                : `mkdir -p ~/.gemini/config/skills/promptpilot-enhance\ncp integrations/gemini-cli/README.md ~/.gemini/config/skills/promptpilot-enhance/SKILL.md\n# Then in Gemini CLI, type:\n# /enhance Change the UI look ///Make it minimal///`
+              : editor === 'codex-cli'
+                ? `# Add the /enhance instructions to your Codex CLI config:\n# See integrations/codex-cli/README.md\n# Then in Codex CLI, type:\n# /enhance Change the UI look ///Make it minimal///`
+                : os === 'windows'
+                  ? `. .\\integrations\\generic\\PromptPilot.ps1\nenhance "Change the UI look ///Make it minimal///"`
+                  : `source ./integrations/generic/promptpilot.sh\nenhance "Change the UI look ///Make it minimal///"`;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 space-y-8">

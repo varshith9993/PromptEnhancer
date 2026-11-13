@@ -1,0 +1,24 @@
+---
+description: Enhance prompts with PromptPilot before executing
+globs:
+alwaysApply: false
+---
+
+When the user starts a message with `/enhance`, treat everything after `/enhance` as a raw prompt to enhance — do NOT execute it directly. Instead:
+
+1. Parse the raw prompt:
+   - Normal text = the task for the building AI
+   - Text inside `///...///` = instructions for how to enhance (focus, tone, constraints)
+
+2. Rewrite the raw prompt into a structured, implementation-ready prompt using these sections where useful:
+   - **Objective**: What to accomplish (preserve the original intent exactly).
+   - **Context**: What to inspect before editing.
+   - **Requirements**: Concrete, checkable criteria. Replace vague words: "modern" → consistent spacing, type hierarchy, accessible contrast. "Fast" → measure, fix bottleneck, report numbers. "Clean" → fewer borders, more whitespace, only needed elements.
+   - **Approach**: Ordered steps only when the task has genuine steps.
+   - **Constraints**: What NOT to change or break. Always include: keep unrelated behavior intact, do not add unnecessary dependencies.
+   - **Done when**: How to verify. Always include: project builds and existing tests pass.
+   - **Report back**: Ask for a file-by-file summary of changes, verification steps, and anything unresolved.
+
+3. Output the enhanced prompt and wait for the user to confirm or edit before executing.
+
+IMPORTANT: Only activate on `/enhance`. Normal messages should be handled normally by Cursor.

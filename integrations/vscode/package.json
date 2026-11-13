@@ -1,0 +1,43 @@
+{
+  "name": "promptpilot-enhance",
+  "displayName": "PromptPilot Enhance",
+  "description": "Enhance your AI coding prompts before sending them. Right-click or use Cmd+Shift+E to transform rough instructions into structured, actionable prompts.",
+  "version": "0.1.0",
+  "publisher": "promptpilot",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onCommand:promptpilot.enhance"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "promptpilot.enhance",
+        "title": "PromptPilot: Enhance Prompt"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "promptpilot.enhance",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "promptpilot.enhance",
+          "when": "editorHasSelection",
+          "group": "1_modification"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -watch -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}
