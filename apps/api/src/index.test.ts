@@ -1,47 +1,54 @@
 import assert from 'node:assert/strict';
-import type { AddressInfo } from 'node:net';
+import type http from 'node:http';
+import { Readable } from 'node:stream';
 import test from 'node:test';
-import { createServer } from './index.js';
+import { handleRequest } from './index.js';
+
+async function invoke(method: string, url: string, body?: unknown): Promise<{
+  status: number;
+  json: Record<string, unknown>;
+}> {
+  const payload = body === undefined ? '' : JSON.stringify(body);
+  const req = Readable.from(payload ? [Buffer.from(payload)] : []) as unknown as http.IncomingMessage;
+  req.method = method;
+  req.url = url;
+  req.headers = {};
+
+  let status = 200;
+  let raw = '';
+  const res = {
+    setHeader() {},
+    writeHead(code: number) {
+      status = code;
+    },
+    end(chunk?: string) {
+      if (chunk) raw += chunk;
+    }
+  } as unknown as http.ServerResponse;
+
+  await handleRequest(req, res);
+  return { status, json: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
+}
 
 test('API core routes: /health, /api/plans, /api/enhance, and 401 on protected route', async () => {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const { port } = server.address() as AddressInfo;
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const health = await invoke('GET', '/health');
+  assert.equal(health.status, 200);
+  assert.equal(health.json.ok, true);
 
-  try {
-    const healthRes = await fetch(`${baseUrl}/health`);
-    assert.equal(healthRes.status, 200);
-    const healthJson = (await healthRes.json()) as { ok: boolean };
-    assert.equal(healthJson.ok, true);
+  const plans = await invoke('GET', '/api/plans');
+  assert.equal(plans.status, 200);
+  assert.ok(Array.isArray(plans.json.plans) && plans.json.plans.length >= 4);
 
-    const plansRes = await fetch(`${baseUrl}/api/plans`);
-    assert.equal(plansRes.status, 200);
-    const plansJson = (await plansRes.json()) as { plans: unknown[] };
-    assert.ok(plansJson.plans.length >= 4);
+  const enhance = await invoke('POST', '/api/enhance', {
+    originalPrompt: 'Change the UI look ///Keep it minimal///'
+  });
+  assert.equal(enhance.status, 200);
+  assert.match(String(enhance.json.enhancedPrompt), /## Objective/);
+  assert.match(String(enhance.json.enhancedPrompt), /Keep it minimal/);
 
-    const enhanceRes = await fetch(`${baseUrl}/api/enhance`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ originalPrompt: 'Change the UI look ///Keep it minimal///' })
-    });
-    assert.equal(enhanceRes.status, 200);
-    const enhanceJson = (await enhanceRes.json()) as { enhancedPrompt: string };
-    assert.match(enhanceJson.enhancedPrompt, /## Objective/);
-    assert.match(enhanceJson.enhancedPrompt, /Keep it minimal/);
+  const unauth = await invoke('GET', '/api/me/preferences');
+  assert.equal(unauth.status, 401);
 
-    const unauthRes = await fetch(`${baseUrl}/api/me/preferences`);
-    assert.equal(unauthRes.status, 401);
-
-    const badByokRes = await fetch(`${baseUrl}/api/byok/enhance`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    assert.equal(badByokRes.status, 400);
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      server.close((err) => (err ? reject(err) : resolve()))
-    );
-  }
+  const badByok = await invoke('POST', '/api/byok/enhance', {});
+  assert.equal(badByok.status, 400);
 });
