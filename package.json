@@ -1,0 +1,21 @@
+{
+  "name": "promptpilot",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @promptpilot/shared && npm run build -w @promptpilot/config && npm run build -w @promptpilot/prompt-engine && npm run build -w @promptpilot/api && npm run build -w @promptpilot/cli && npm run build -w @promptpilot/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

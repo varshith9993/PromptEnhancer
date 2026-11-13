@@ -1,0 +1,17 @@
+{
+  "name": "@promptpilot/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "dependencies": {
+    "@promptpilot/config": "*",
+    "@promptpilot/prompt-engine": "*",
+    "@promptpilot/shared": "*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js"
+  }
+}
+
