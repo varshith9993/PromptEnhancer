@@ -8,13 +8,20 @@ import {
   testByokConnection,
   type ByokConfig
 } from '@promptpilot/prompt-engine';
-import type { EnhanceRequest } from '@promptpilot/shared';
+import type { EnhanceRequest, PromptProfile, UserInstruction } from '@promptpilot/shared';
+import {
+  fetchUserPreferences,
+  fetchUserProfiles,
+  insertUserProfile,
+  replaceUserPreferences,
+  verifySupabaseUser
+} from './supabase-auth.js';
 
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5173';
 
 function setCors(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', WEB_ORIGIN);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
@@ -137,6 +144,57 @@ export function createServer(): http.Server {
         sendJson(res, 400, { error: message });
       }
       return;
+    }
+
+    if ((url === '/api/me/preferences' || url === '/api/me/profiles') && (method === 'GET' || method === 'PUT' || method === 'POST')) {
+      const authHeader = req.headers.authorization;
+      const user = await verifySupabaseUser(authHeader);
+      if (!user || !authHeader?.startsWith('Bearer ')) {
+        sendJson(res, 401, { error: 'Unauthorized' });
+        return;
+      }
+      const token = authHeader.slice(7).trim();
+
+      try {
+        if (url === '/api/me/preferences' && method === 'GET') {
+          const items = await fetchUserPreferences(token, user.id);
+          sendJson(res, 200, { items });
+          return;
+        }
+        if (url === '/api/me/preferences' && method === 'PUT') {
+          const body = JSON.parse(await readBody(req)) as { items?: UserInstruction[] };
+          if (!Array.isArray(body.items)) {
+            sendJson(res, 400, { error: 'items array is required' });
+            return;
+          }
+          await replaceUserPreferences(token, user, body.items);
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+        if (url === '/api/me/profiles' && method === 'GET') {
+          const profiles = await fetchUserProfiles(token, user.id);
+          sendJson(res, 200, { profiles });
+          return;
+        }
+        if (url === '/api/me/profiles' && method === 'POST') {
+          const body = JSON.parse(await readBody(req)) as Partial<PromptProfile>;
+          if (!body.name || !body.systemGuidance) {
+            sendJson(res, 400, { error: 'name and systemGuidance are required' });
+            return;
+          }
+          await insertUserProfile(token, user, {
+            name: body.name,
+            category: body.category ?? 'feature',
+            description: body.description ?? 'Custom user profile',
+            systemGuidance: body.systemGuidance
+          });
+          sendJson(res, 201, { ok: true });
+          return;
+        }
+      } catch (err) {
+        sendJson(res, 400, { error: err instanceof Error ? err.message : 'Request failed' });
+        return;
+      }
     }
 
     sendJson(res, 404, { error: 'Not found' });
