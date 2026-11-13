@@ -5,7 +5,12 @@ import test from 'node:test';
 import { handleRequest } from './index.js';
 import { decryptApiKey, encryptApiKey, generatePromptPilotToken, hashToken } from './crypto.js';
 
-async function invoke(method: string, url: string, body?: unknown): Promise<{
+async function invoke(
+  method: string,
+  url: string,
+  body?: unknown,
+  headers?: Record<string, string>
+): Promise<{
   status: number;
   json: Record<string, unknown>;
 }> {
@@ -13,7 +18,7 @@ async function invoke(method: string, url: string, body?: unknown): Promise<{
   const req = Readable.from(payload ? [Buffer.from(payload)] : []) as unknown as http.IncomingMessage;
   req.method = method;
   req.url = url;
-  req.headers = {};
+  req.headers = { ...(headers ?? {}) };
   (req as unknown as { socket: { remoteAddress: string } }).socket = { remoteAddress: '127.0.0.1' };
 
   let status = 200;
@@ -74,4 +79,53 @@ test('crypto: AES-256-GCM encryption, decryption and PromptPilot token generatio
   assert.match(token, /^pp_live_[a-f0-9]{48}$/);
   assert.match(prefix, /^pp_live_[a-f0-9]{6}\.\.\.[a-f0-9]{4}$/);
   assert.equal(hashToken(token), hash);
+});
+
+test('User API keys and personal access tokens lifecycle: create, list, authenticate, and manage', async () => {
+  const tokenRes = await invoke(
+    'POST',
+    '/api/me/tokens',
+    { name: 'Integration Test Key' },
+    { authorization: 'Bearer local-token' }
+  );
+  assert.equal(tokenRes.status, 201);
+  const pat = String(tokenRes.json.token);
+  assert.match(pat, /^pp_live_/);
+
+  const listTokens = await invoke('GET', '/api/me/tokens', undefined, {
+    authorization: `Bearer ${pat}`
+  });
+  assert.equal(listTokens.status, 200);
+  assert.ok(Array.isArray(listTokens.json.tokens));
+
+  const saveKey = await invoke(
+    'PUT',
+    '/api/me/keys',
+    {
+      providerId: 'openrouter',
+      apiKey: 'sk-or-test-mock-key-12345',
+      modelId: 'qwen/qwen-2.5-coder-32b-instruct',
+      label: 'Testing Key',
+      skipTest: true
+    },
+    { authorization: `Bearer ${pat}` }
+  );
+  assert.equal(saveKey.status, 200);
+  assert.equal(saveKey.json.ok, true);
+
+  const listKeys = await invoke('GET', '/api/me/keys', undefined, {
+    authorization: `Bearer ${pat}`
+  });
+  assert.equal(listKeys.status, 200);
+  const keys = listKeys.json.keys as Array<{ providerId: string; status: string }>;
+  assert.ok(keys.some((k) => k.providerId === 'openrouter' && k.status === 'healthy'));
+
+  const deleteKey = await invoke(
+    'DELETE',
+    '/api/me/keys?providerId=openrouter',
+    undefined,
+    { authorization: `Bearer ${pat}` }
+  );
+  assert.equal(deleteKey.status, 200);
+  assert.equal(deleteKey.json.ok, true);
 });

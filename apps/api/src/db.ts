@@ -33,11 +33,27 @@ export interface DbAccessToken {
 let dbInstance: DatabaseSync | null = null;
 
 function getDbPath(): string {
-  const dir = path.join(os.homedir(), '.promptpilot');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (process.env.PROMPTPILOT_DB_PATH) {
+    const custom = process.env.PROMPTPILOT_DB_PATH;
+    const customDir = path.dirname(custom);
+    if (!fs.existsSync(customDir)) {
+      fs.mkdirSync(customDir, { recursive: true });
+    }
+    return custom;
   }
-  return path.join(dir, 'promptpilot.db');
+  try {
+    const dir = path.join(os.homedir(), '.promptpilot');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    return path.join(dir, 'promptpilot.db');
+  } catch {
+    const fallbackDir = path.join(process.cwd(), '.promptpilot');
+    if (!fs.existsSync(fallbackDir)) {
+      fs.mkdirSync(fallbackDir, { recursive: true });
+    }
+    return path.join(fallbackDir, 'promptpilot.db');
+  }
 }
 
 export function getDatabase(): DatabaseSync {
