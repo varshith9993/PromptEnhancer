@@ -11,6 +11,10 @@ interface StoredKey {
   label?: string;
   baseUrl?: string;
   modelId?: string;
+  status: 'healthy' | 'invalid' | 'error';
+  lastCheckedAt?: string;
+  lastHealthyAt?: string;
+  lastError?: string;
   updatedAt: string;
 }
 
@@ -22,8 +26,22 @@ interface StoredToken {
   createdAt: string;
 }
 
+const LOCAL_SESSION_KEY = 'promptpilot_local_mode_v1';
+
 export function DashboardPage() {
-  const [session, setSession] = useState<AuthSession>(null);
+  const [session, setSession] = useState<AuthSession>(() => {
+    if (localStorage.getItem(LOCAL_SESSION_KEY) === 'true') {
+      return {
+        access_token: 'local-token',
+        user: {
+          id: 'local-desktop-user',
+          email: 'desktop@localhost',
+          app_metadata: { provider: 'local-sqlite' }
+        }
+      } as unknown as AuthSession;
+    }
+    return null;
+  });
   const [loading, setLoading] = useState(true);
 
   // Stored provider keys
@@ -31,10 +49,12 @@ export function DashboardPage() {
   const [loadingKeys, setLoadingKeys] = useState(false);
   const [addProvider, setAddProvider] = useState<ByokProviderId>('freellmapi');
   const [addApiKey, setAddApiKey] = useState('');
-  const [addBaseUrl, setAddBaseUrl] = useState('');
-  const [addModelId, setAddModelId] = useState('');
+  const [addBaseUrl, setAddBaseUrl] = useState('http://127.0.0.1:31415/v1');
+  const [addModelId, setAddModelId] = useState('auto');
+  const [addLabel, setAddLabel] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [keyError, setKeyError] = useState('');
+  const [keySuccess, setKeySuccess] = useState('');
 
   // PromptPilot API Tokens
   const [tokens, setTokens] = useState<StoredToken[]>([]);
@@ -50,14 +70,30 @@ export function DashboardPage() {
       return;
     }
     supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+      if (data.session) {
+        setSession(data.session);
+      }
       setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next);
+      if (next) {
+        setSession(next);
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  function enableLocalMode() {
+    localStorage.setItem(LOCAL_SESSION_KEY, 'true');
+    setSession({
+      access_token: 'local-token',
+      user: {
+        id: 'local-desktop-user',
+        email: 'desktop@localhost',
+        app_metadata: { provider: 'local-sqlite' }
+      }
+    } as unknown as AuthSession);
+  }
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -87,6 +123,7 @@ export function DashboardPage() {
     if (!session?.access_token || !addApiKey.trim()) return;
     setSavingKey(true);
     setKeyError('');
+    setKeySuccess('');
     try {
       const res = await fetch(`${API_URL}/api/me/keys`, {
         method: 'PUT',
@@ -98,23 +135,31 @@ export function DashboardPage() {
           providerId: addProvider,
           apiKey: addApiKey.trim(),
           ...(addBaseUrl.trim() ? { baseUrl: addBaseUrl.trim() } : {}),
-          ...(addModelId.trim() ? { modelId: addModelId.trim() } : {})
+          ...(addModelId.trim() ? { modelId: addModelId.trim() } : {}),
+          ...(addLabel.trim() ? { label: addLabel.trim() } : {})
         })
       });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        model?: string;
+        models?: string[];
+      };
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
         throw new Error(data.error ?? 'Failed to save key');
       }
+      setKeySuccess(`✓ Test positive! Connection healthy to model "${data.model || 'auto'}". Key encrypted and saved.`);
       setAddApiKey('');
-      setAddBaseUrl('');
-      setAddModelId('');
+      setAddLabel('');
+      setTimeout(() => setKeySuccess(''), 6000);
+
       // Refresh list
       const r = await fetch(`${API_URL}/api/me/keys`, {
         headers: { Authorization: `Bearer ${session.access_token}` }
       });
       if (r.ok) {
-        const data = (await r.json()) as { keys?: StoredKey[] };
-        setKeys(data.keys ?? []);
+        const refreshed = (await r.json()) as { keys?: StoredKey[] };
+        setKeys(refreshed.keys ?? []);
       }
     } catch (err) {
       setKeyError(err instanceof Error ? err.message : 'Error saving key');
@@ -194,16 +239,25 @@ export function DashboardPage() {
     return (
       <div className="mx-auto max-w-md px-4 py-16">
         <div className="p-6 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-4 text-center">
-          <h1 className="text-lg font-semibold">Sign in required</h1>
+          <h1 className="text-lg font-semibold">Account Sign In</h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Sign in with Google, GitHub, or Email to view your dashboard and manage stored provider keys.
+            Sign in with Google, GitHub, or Email to sync across devices, or continue in offline local desktop mode.
           </p>
-          <Link
-            to="/login"
-            className="inline-block px-4 py-2 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500"
-          >
-            Go to Sign in
-          </Link>
+          <div className="flex flex-col gap-2 pt-2">
+            <Link
+              to="/login"
+              className="px-4 py-2 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-500 text-center"
+            >
+              Sign In with Cloud Account
+            </Link>
+            <button
+              type="button"
+              onClick={enableLocalMode}
+              className="px-4 py-2 rounded border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              Continue in Local Desktop Mode (Offline SQLite DB)
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -237,7 +291,9 @@ export function DashboardPage() {
           <p className="font-semibold capitalize">
             {(session.user.app_metadata?.provider as string | undefined) ?? 'email'}
           </p>
-          <p className="text-xs text-zinc-500">Verified via Supabase</p>
+          <p className="text-xs text-zinc-500">
+            {session.user.app_metadata?.provider === 'local-sqlite' ? 'Local SQLite DB' : 'Verified via Supabase'}
+          </p>
         </div>
         <div className="p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-1">
           <span className="text-xs text-zinc-500">Key Security</span>
@@ -265,21 +321,43 @@ export function DashboardPage() {
           <div className="divide-y divide-zinc-200 dark:divide-zinc-800 border rounded-lg border-zinc-200 dark:border-zinc-800 text-xs">
             {keys.map((k) => {
               const meta = BYOK_PROVIDERS.find((p) => p.id === k.providerId);
+              const isHealthy = k.status === 'healthy';
               return (
                 <div key={k.providerId} className="p-3 flex items-center justify-between gap-2">
-                  <div>
-                    <span className="font-semibold">{meta?.name ?? k.providerId}</span>
-                    <span className="ml-2 text-zinc-500">
-                      {k.modelId ? `model: ${k.modelId}` : 'default model'}
+                  <div className="flex items-center gap-3">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                        isHealthy
+                          ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${isHealthy ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      {isHealthy ? 'Healthy' : 'Issue'}
                     </span>
-                    {k.baseUrl && (
-                      <span className="ml-2 text-[11px] text-zinc-400">({k.baseUrl})</span>
-                    )}
+                    <div>
+                      <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                        {meta?.name ?? k.providerId}
+                        {k.label && <span className="ml-2 font-normal text-zinc-400">({k.label})</span>}
+                      </div>
+                      <div className="text-[11px] text-zinc-500">
+                        {k.modelId ? `model: ${k.modelId}` : 'default model'}
+                        {k.baseUrl && <span className="ml-2 font-mono text-zinc-400">({k.baseUrl})</span>}
+                        {k.lastCheckedAt && (
+                          <span className="ml-2">
+                            tested {new Date(k.lastCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      {k.lastError && (
+                        <div className="text-[10px] text-rose-400 mt-0.5">{k.lastError}</div>
+                      )}
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => void handleDeleteKey(k.providerId)}
-                    className="text-xs text-red-500 hover:text-red-400"
+                    className="text-xs text-rose-500 hover:text-rose-400 px-2 py-1"
                   >
                     Delete
                   </button>
@@ -290,46 +368,106 @@ export function DashboardPage() {
         )}
 
         <form onSubmit={(e) => void handleSaveKey(e)} className="space-y-3 pt-2 text-xs border-t border-zinc-200 dark:border-zinc-800">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Add or Update Provider Key</span>
-          <div className="grid sm:grid-cols-3 gap-2">
-            <select
-              value={addProvider}
-              onChange={(e) => {
-                const next = e.target.value as ByokProviderId;
-                setAddProvider(next);
-                const meta = BYOK_PROVIDERS.find((p) => p.id === next);
-                if (meta?.id === 'freellmapi') {
-                  setAddBaseUrl('http://127.0.0.1:31415/v1');
-                  setAddModelId('auto');
-                } else {
-                  setAddBaseUrl('');
-                  setAddModelId('');
-                }
-              }}
-              className="px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent"
-            >
-              {BYOK_PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id} className="bg-zinc-900 text-zinc-100">
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="password"
-              placeholder="API Key (e.g. freellmapi-... or gsk_...)"
-              value={addApiKey}
-              onChange={(e) => setAddApiKey(e.target.value)}
-              className="px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent"
-            />
-            <button
-              type="submit"
-              disabled={savingKey || !addApiKey.trim()}
-              className="px-3 py-1.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium disabled:opacity-50"
-            >
-              {savingKey ? 'Saving…' : 'Save Encrypted Key'}
-            </button>
+          <div className="flex items-center justify-between">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">Add or Update Provider Key</span>
+            <span className="text-[11px] text-zinc-400">Tests connection before saving</span>
           </div>
-          {keyError && <p className="text-red-500 text-[11px]">{keyError}</p>}
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            <div>
+              <label className="block text-[11px] text-zinc-500 mb-1">Platform</label>
+              <select
+                value={addProvider}
+                onChange={(e) => {
+                  const next = e.target.value as ByokProviderId;
+                  setAddProvider(next);
+                  const meta = BYOK_PROVIDERS.find((p) => p.id === next);
+                  if (meta?.id === 'freellmapi') {
+                    setAddBaseUrl('http://127.0.0.1:31415/v1');
+                    setAddModelId('auto');
+                  } else {
+                    setAddBaseUrl(meta?.defaultBaseUrl ?? '');
+                    setAddModelId(meta?.defaultModel ?? '');
+                  }
+                }}
+                className="w-full px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-xs"
+              >
+                {BYOK_PROVIDERS.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-zinc-900 text-zinc-100">
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-zinc-500 mb-1">API Key</label>
+              <input
+                type="password"
+                placeholder="Paste key here"
+                value={addApiKey}
+                onChange={(e) => setAddApiKey(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-xs"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] text-zinc-500 mb-1">Label (Optional)</label>
+              <input
+                type="text"
+                placeholder="e.g. My FreeLLMAPI"
+                value={addLabel}
+                onChange={(e) => setAddLabel(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-xs"
+              />
+            </div>
+
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={savingKey || !addApiKey.trim()}
+                className="w-full px-3 py-1.5 rounded bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium text-xs disabled:opacity-50 hover:bg-zinc-800"
+              >
+                {savingKey ? 'Testing Connection...' : 'Test & Add Key'}
+              </button>
+            </div>
+          </div>
+
+          {(addProvider === 'openai-compatible' || addProvider === 'freellmapi') && (
+            <div className="grid sm:grid-cols-2 gap-2 pt-1">
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-1">Base URL</label>
+                <input
+                  type="text"
+                  value={addBaseUrl}
+                  onChange={(e) => setAddBaseUrl(e.target.value)}
+                  placeholder="http://127.0.0.1:31415/v1"
+                  className="w-full px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-1">Model ID</label>
+                <input
+                  type="text"
+                  value={addModelId}
+                  onChange={(e) => setAddModelId(e.target.value)}
+                  placeholder="auto"
+                  className="w-full px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-xs"
+                />
+              </div>
+            </div>
+          )}
+
+          {keyError && (
+            <div className="p-2.5 rounded bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs">
+              {keyError}
+            </div>
+          )}
+          {keySuccess && (
+            <div className="p-2.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs">
+              {keySuccess}
+            </div>
+          )}
         </form>
       </div>
 

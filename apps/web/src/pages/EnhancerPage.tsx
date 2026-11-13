@@ -1,4 +1,5 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   BUILTIN_PROFILES,
   BYOK_PROVIDERS,
@@ -17,8 +18,10 @@ import type {
   TaskCategory,
   UserInstruction
 } from '@promptpilot/shared';
+import { supabase, type AuthSession } from '../lib/supabase';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
+const LOCAL_SESSION_KEY = 'promptpilot_local_mode_v1';
 
 const DEFAULT_PREFERENCES: UserInstruction[] = [
   { id: 'p1', text: 'Preserve existing functionality and routes', enabled: true, isDefault: true },
@@ -46,7 +49,8 @@ function isNetworkOrCorsError(err: unknown): boolean {
 }
 
 export function EnhancerPage() {
-  const [mode, setMode] = useState<'free' | 'byok'>('free');
+  const [session, setSession] = useState<AuthSession>(null);
+  const [mode, setMode] = useState<'free' | 'account' | 'byok'>('free');
   const [customProfiles, setCustomProfiles] = useState<PromptProfile[]>(() => {
     try {
       const raw = localStorage.getItem(CUSTOM_PROFILES_KEY);
@@ -95,6 +99,30 @@ export function EnhancerPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (localStorage.getItem(LOCAL_SESSION_KEY) === 'true') {
+      setSession({
+        access_token: 'local-token',
+        user: { id: 'local-desktop-user', email: 'desktop@localhost' }
+      } as unknown as AuthSession);
+      setMode('account');
+    } else if (supabase) {
+      supabase.auth.getSession().then(({ data }) => {
+        if (data.session) {
+          setSession(data.session);
+          setMode('account');
+        }
+      });
+      const { data: sub } = supabase.auth.onAuthStateChange((_e, next) => {
+        if (next) {
+          setSession(next);
+          setMode('account');
+        }
+      });
+      return () => sub.subscription.unsubscribe();
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -207,7 +235,7 @@ export function EnhancerPage() {
         ...(selectedProfile?.isBuiltin ? { profileId: selectedProfile.id } : {}),
         ...(selectedProfile?.category ? { category: selectedProfile.category } : {}),
         targetAgent,
-        mode,
+        mode: mode === 'account' ? 'byok' : mode,
         projectContext:
           contextMode === 'selected_files' && selectedFiles.length > 0
             ? { mode: 'selected_files', selectedFiles }
@@ -215,7 +243,28 @@ export function EnhancerPage() {
       };
 
       let result: EnhanceResponse;
-      if (mode === 'free') {
+      if (mode === 'account') {
+        const token =
+          session?.access_token ||
+          (localStorage.getItem(LOCAL_SESSION_KEY) === 'true' ? 'local-token' : '');
+        if (!token) {
+          throw new Error('Please configure a provider key in the Dashboard first.');
+        }
+        const apiRes = await fetch(`${API_URL}/api/enhance`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ ...req, mode: 'byok' })
+        });
+        const data = (await apiRes.json()) as EnhanceResponse & { error?: string };
+        if (!apiRes.ok) {
+          throw new Error(data.error ?? 'Account-stored AI call failed. Ensure a healthy key is added in Dashboard.');
+        }
+        result = data;
+        setDisclaimer('Generated with your account-stored AI key via PromptPilot backend.');
+      } else if (mode === 'free') {
         result = enhancePromptRuleBased(req);
       } else {
         const primaryConfig: ByokConfig = {
@@ -293,10 +342,16 @@ export function EnhancerPage() {
   }
 
   function handleUndo() {
-    setEnhancedPrompt('');
-    setVersions([]);
-    setActiveVersionIdx(0);
-    setDisclaimer('');
+    if (versions.length > 1 && activeVersionIdx > 0) {
+      const prevIdx = activeVersionIdx - 1;
+      setActiveVersionIdx(prevIdx);
+      setEnhancedPrompt(versions[prevIdx] ?? '');
+    } else {
+      setEnhancedPrompt('');
+      setVersions([]);
+      setActiveVersionIdx(0);
+      setDisclaimer('');
+    }
     setIsEditing(false);
     setCopied(false);
   }
@@ -348,7 +403,16 @@ export function EnhancerPage() {
               mode === 'free' ? 'bg-indigo-600 text-white' : 'text-zinc-600 dark:text-zinc-300'
             }`}
           >
-            Free (No Key)
+            Free (Rule-Based)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode('account')}
+            className={`px-3 py-1.5 rounded ${
+              mode === 'account' ? 'bg-indigo-600 text-white' : 'text-zinc-600 dark:text-zinc-300'
+            }`}
+          >
+            Account AI (Stored Key)
           </button>
           <button
             type="button"
@@ -357,10 +421,29 @@ export function EnhancerPage() {
               mode === 'byok' ? 'bg-indigo-600 text-white' : 'text-zinc-600 dark:text-zinc-300'
             }`}
           >
-            BYOK (Your Key)
+            BYOK (Memory Only)
           </button>
         </div>
       </div>
+
+      {mode === 'account' && (
+        <div className="p-4 rounded-lg border border-indigo-200 dark:border-indigo-900/40 bg-indigo-50/50 dark:bg-indigo-950/20 text-xs flex items-center justify-between gap-3">
+          <div>
+            <span className="font-semibold text-indigo-700 dark:text-indigo-300">
+              Account-Stored AI Provider Active:
+            </span>{' '}
+            <span className="text-zinc-600 dark:text-zinc-300">
+              Enhancements automatically use your verified, healthy provider key (FreeLLMAPI, Gemini, OpenRouter) saved in your database.
+            </span>
+          </div>
+          <Link
+            to="/dashboard"
+            className="px-2.5 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-500 font-medium shrink-0"
+          >
+            Manage Keys
+          </Link>
+        </div>
+      )}
 
       {mode === 'byok' && (
         <div className="p-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-4">
@@ -557,13 +640,19 @@ export function EnhancerPage() {
 
           <label className="space-y-1 block text-xs">
             <span className="text-zinc-500 dark:text-zinc-400">
-              Original Prompt (supports inline <code>///additional instructions///</code>)
+              Original Prompt (supports <code>/enhance</code> and inline <code>///instructions for AI///</code>)
             </span>
             <textarea
               rows={6}
               value={originalPrompt}
               onChange={(e) => setOriginalPrompt(e.target.value)}
-              placeholder="e.g. Change the UI look. ///Make it minimal and responsive./// "
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  void runEnhance();
+                }
+              }}
+              placeholder="e.g. /enhance Add authentication to API. ///Keep OAuth minimal and do not break tests./// (Press Ctrl+Enter to enhance)"
               className="w-full p-3 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm font-mono"
             />
           </label>
@@ -613,7 +702,7 @@ export function EnhancerPage() {
             onClick={() => void runEnhance()}
             className="w-full py-2.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
           >
-            {loading ? 'Enhancing...' : `Enhance Prompt (${mode === 'free' ? 'Free' : 'BYOK'})`}
+            {loading ? 'Enhancing...' : `Enhance Prompt (${mode === 'account' ? 'Account AI' : mode === 'free' ? 'Free Rule-Based' : 'BYOK'})`}
           </button>
 
           {error && (

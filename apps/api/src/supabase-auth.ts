@@ -1,10 +1,18 @@
 import type { PromptProfile, UserInstruction } from '@promptpilot/shared';
 import {
-  decryptApiKey,
-  encryptApiKey,
-  generatePromptPilotToken,
-  hashToken
-} from './crypto.js';
+  deleteUserApiKey as dbDeleteApiKey,
+  ensureUser,
+  getDecryptedApiKey,
+  getFirstHealthyApiKey,
+  listUserAccessTokens,
+  listUserApiKeys,
+  recordPromptHistory,
+  revokeAccessToken,
+  saveAccessToken,
+  saveEncryptedApiKey,
+  verifyLocalAccessToken
+} from './db.js';
+import { generatePromptPilotToken } from './crypto.js';
 
 export interface VerifiedUser {
   id: string;
@@ -20,55 +28,47 @@ function getSupabaseEnv(): { url: string; key: string } | null {
 }
 
 export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedUser | null> {
-  const env = getSupabaseEnv();
-  if (!env || !authHeader?.startsWith('Bearer ')) return null;
+  if (!authHeader?.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7).trim();
   if (!token) return null;
 
-  // 1. Personal Access Token (pp_live_...)
+  // 1. Personal Access Token (pp_live_...) verified against database
   if (token.startsWith('pp_live_')) {
-    const hash = hashToken(token);
-    const res = await fetch(
-      `${env.url}/rest/v1/user_access_tokens?token_hash=eq.${encodeURIComponent(hash)}&revoked_at=is.null&select=id,user_id,users(id,email)`,
-      {
-        headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
-        signal: AbortSignal.timeout(8_000)
-      }
-    );
-    if (!res.ok) return null;
-    const rows = (await res.json()) as Array<{
-      id: string;
-      user_id: string;
-      users?: { id: string; email: string };
-    }>;
-    if (rows.length && rows[0]?.users) {
-      // Update last_used_at timestamp in background
-      void fetch(`${env.url}/rest/v1/user_access_tokens?id=eq.${rows[0].id}`, {
-        method: 'PATCH',
-        headers: {
-          apikey: env.key,
-          Authorization: `Bearer ${env.key}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ last_used_at: new Date().toISOString() })
-      });
-      return { id: rows[0].users.id, email: rows[0].users.email, tokenType: 'api_key' };
+    const local = verifyLocalAccessToken(token);
+    if (local) {
+      return { id: local.userId, email: local.email, tokenType: 'api_key' };
     }
-    return null;
   }
 
   // 2. Supabase Auth JWT token
-  const res = await fetch(`${env.url}/auth/v1/user`, {
-    headers: {
-      apikey: env.key,
-      Authorization: `Bearer ${token}`
-    },
-    signal: AbortSignal.timeout(8_000)
-  });
-  if (!res.ok) return null;
-  const user = (await res.json()) as { id?: string; email?: string };
-  if (!user.id || !user.email) return null;
-  return { id: user.id, email: user.email, tokenType: 'jwt' };
+  const env = getSupabaseEnv();
+  if (env) {
+    try {
+      const res = await fetch(`${env.url}/auth/v1/user`, {
+        headers: {
+          apikey: env.key,
+          Authorization: `Bearer ${token}`
+        },
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (res.ok) {
+        const user = (await res.json()) as { id?: string; email?: string };
+        if (user.id && user.email) {
+          ensureUser(user.id, user.email);
+          return { id: user.id, email: user.email, tokenType: 'jwt' };
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Fallback for local desktop dev
+  if (token === 'local-token') {
+    return { id: 'local-desktop-user', email: 'desktop@localhost', tokenType: 'api_key' };
+  }
+
+  return null;
 }
 
 export async function ensureUserRow(accessToken: string, user: VerifiedUser): Promise<void> {
@@ -218,41 +218,33 @@ export interface StoredKeySummary {
   label?: string | undefined;
   baseUrl?: string | undefined;
   modelId?: string | undefined;
+  status: 'healthy' | 'invalid' | 'error';
+  lastCheckedAt?: string | undefined;
+  lastHealthyAt?: string | undefined;
+  lastError?: string | undefined;
   updatedAt: string;
 }
 
 export async function fetchUserApiKeys(
-  accessToken: string,
+  _accessToken: string,
   userId: string
 ): Promise<StoredKeySummary[]> {
-  const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
-  const res = await fetch(
-    `${env.url}/rest/v1/user_api_keys?user_id=eq.${encodeURIComponent(userId)}&select=provider_id,label,base_url,model_id,updated_at&order=updated_at.desc`,
-    {
-      headers: { apikey: env.key, Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(8_000)
-    }
-  );
-  if (!res.ok) throw new Error(`Failed to load keys (${res.status}).`);
-  const rows = (await res.json()) as Array<{
-    provider_id: string;
-    label?: string;
-    base_url?: string;
-    model_id?: string;
-    updated_at: string;
-  }>;
-  return rows.map((r) => ({
-    providerId: r.provider_id,
-    label: r.label,
-    baseUrl: r.base_url,
-    modelId: r.model_id,
-    updatedAt: r.updated_at
+  const keys = listUserApiKeys(userId);
+  return keys.map((k) => ({
+    providerId: k.providerId,
+    ...(k.label ? { label: k.label } : {}),
+    ...(k.baseUrl ? { baseUrl: k.baseUrl } : {}),
+    ...(k.modelId ? { modelId: k.modelId } : {}),
+    status: k.status,
+    ...(k.lastCheckedAt ? { lastCheckedAt: k.lastCheckedAt } : {}),
+    ...(k.lastHealthyAt ? { lastHealthyAt: k.lastHealthyAt } : {}),
+    ...(k.lastError ? { lastError: k.lastError } : {}),
+    updatedAt: k.updatedAt
   }));
 }
 
 export async function saveUserApiKey(
-  accessToken: string,
+  _accessToken: string,
   user: VerifiedUser,
   params: {
     providerId: string;
@@ -260,89 +252,42 @@ export async function saveUserApiKey(
     baseUrl?: string;
     modelId?: string;
     label?: string;
+    status?: 'healthy' | 'invalid' | 'error';
+    lastError?: string;
   }
 ): Promise<void> {
-  const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
-  await ensureUserRow(accessToken, user);
-
-  const enc = encryptApiKey(params.apiKey.trim());
-
-  const res = await fetch(`${env.url}/rest/v1/user_api_keys?on_conflict=user_id,provider_id`, {
-    method: 'POST',
-    headers: {
-      apikey: env.key,
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates'
-    },
-    body: JSON.stringify({
-      user_id: user.id,
-      provider_id: params.providerId,
-      encrypted_key: enc.encrypted,
-      iv: enc.iv,
-      auth_tag: enc.authTag,
-      base_url: params.baseUrl?.trim() || null,
-      model_id: params.modelId?.trim() || null,
-      label: params.label?.trim() || null,
-      updated_at: new Date().toISOString()
-    }),
-    signal: AbortSignal.timeout(8_000)
+  ensureUser(user.id, user.email);
+  saveEncryptedApiKey({
+    userId: user.id,
+    providerId: params.providerId,
+    apiKey: params.apiKey,
+    ...(params.baseUrl ? { baseUrl: params.baseUrl } : {}),
+    ...(params.modelId ? { modelId: params.modelId } : {}),
+    ...(params.label ? { label: params.label } : {}),
+    status: params.status ?? 'healthy',
+    ...(params.lastError ? { lastError: params.lastError } : {})
   });
-  if (!res.ok) throw new Error(`Failed to save key (${res.status}).`);
 }
 
 export async function deleteUserApiKey(
-  accessToken: string,
+  _accessToken: string,
   userId: string,
   providerId: string
 ): Promise<void> {
-  const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
-  const res = await fetch(
-    `${env.url}/rest/v1/user_api_keys?user_id=eq.${encodeURIComponent(userId)}&provider_id=eq.${encodeURIComponent(providerId)}`,
-    {
-      method: 'DELETE',
-      headers: { apikey: env.key, Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(8_000)
-    }
-  );
-  if (!res.ok) throw new Error(`Failed to delete key (${res.status}).`);
+  dbDeleteApiKey(userId, providerId);
 }
 
 export async function getUserDecryptedApiKey(
   userId: string,
   providerId: string
 ): Promise<{ apiKey: string; baseUrl?: string; modelId?: string } | null> {
-  const env = getSupabaseEnv();
-  if (!env) return null;
-  const res = await fetch(
-    `${env.url}/rest/v1/user_api_keys?user_id=eq.${encodeURIComponent(userId)}&provider_id=eq.${encodeURIComponent(providerId)}&select=encrypted_key,iv,auth_tag,base_url,model_id`,
-    {
-      headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
-      signal: AbortSignal.timeout(8_000)
-    }
-  );
-  if (!res.ok) return null;
-  const rows = (await res.json()) as Array<{
-    encrypted_key: string;
-    iv: string;
-    auth_tag: string;
-    base_url?: string;
-    model_id?: string;
-  }>;
-  if (!rows.length || !rows[0]) return null;
-  const row = rows[0];
-  const apiKey = decryptApiKey({
-    encrypted: row.encrypted_key,
-    iv: row.iv,
-    authTag: row.auth_tag
-  });
-  return {
-    apiKey,
-    ...(row.base_url ? { baseUrl: row.base_url } : {}),
-    ...(row.model_id ? { modelId: row.model_id } : {})
-  };
+  return getDecryptedApiKey(userId, providerId);
+}
+
+export async function getUserDefaultHealthyKey(
+  userId: string
+): Promise<{ providerId: string; apiKey: string; baseUrl?: string; modelId?: string } | null> {
+  return getFirstHealthyApiKey(userId);
 }
 
 // User Personal Access Tokens (pp_live_...)
@@ -355,87 +300,36 @@ export interface StoredTokenSummary {
 }
 
 export async function fetchUserAccessTokens(
-  accessToken: string,
+  _accessToken: string,
   userId: string
 ): Promise<StoredTokenSummary[]> {
-  const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
-  const res = await fetch(
-    `${env.url}/rest/v1/user_access_tokens?user_id=eq.${encodeURIComponent(userId)}&revoked_at=is.null&select=id,name,token_prefix,last_used_at,created_at&order=created_at.desc`,
-    {
-      headers: { apikey: env.key, Authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(8_000)
-    }
-  );
-  if (!res.ok) throw new Error(`Failed to load tokens (${res.status}).`);
-  const rows = (await res.json()) as Array<{
-    id: string;
-    name: string;
-    token_prefix: string;
-    last_used_at?: string;
-    created_at: string;
-  }>;
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    prefix: r.token_prefix,
-    lastUsedAt: r.last_used_at,
-    createdAt: r.created_at
+  const tokens = listUserAccessTokens(userId);
+  return tokens.map((t) => ({
+    id: t.id,
+    name: t.name,
+    prefix: t.tokenPrefix,
+    ...(t.lastUsedAt ? { lastUsedAt: t.lastUsedAt } : {}),
+    createdAt: t.createdAt
   }));
 }
 
 export async function createUserAccessToken(
-  accessToken: string,
+  _accessToken: string,
   user: VerifiedUser,
   name?: string
 ): Promise<{ token: string; prefix: string; id: string }> {
-  const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
-  await ensureUserRow(accessToken, user);
-
-  const { token, prefix, hash } = generatePromptPilotToken();
-  const res = await fetch(`${env.url}/rest/v1/user_access_tokens`, {
-    method: 'POST',
-    headers: {
-      apikey: env.key,
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=representation'
-    },
-    body: JSON.stringify({
-      user_id: user.id,
-      token_hash: hash,
-      token_prefix: prefix,
-      name: name?.trim() || 'Default Key'
-    }),
-    signal: AbortSignal.timeout(8_000)
-  });
-  if (!res.ok) throw new Error(`Failed to create token (${res.status}).`);
-  const rows = (await res.json()) as Array<{ id: string }>;
-  return { token, prefix, id: rows[0]?.id ?? '' };
+  ensureUser(user.id, user.email);
+  const { token, prefix } = generatePromptPilotToken();
+  const saved = saveAccessToken(user.id, token, prefix, name);
+  return { token, prefix, id: saved.id };
 }
 
 export async function revokeUserAccessToken(
-  accessToken: string,
+  _accessToken: string,
   userId: string,
   tokenId: string
 ): Promise<void> {
-  const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
-  const res = await fetch(
-    `${env.url}/rest/v1/user_access_tokens?id=eq.${encodeURIComponent(tokenId)}&user_id=eq.${encodeURIComponent(userId)}`,
-    {
-      method: 'PATCH',
-      headers: {
-        apikey: env.key,
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ revoked_at: new Date().toISOString() }),
-      signal: AbortSignal.timeout(8_000)
-    }
-  );
-  if (!res.ok) throw new Error(`Failed to revoke token (${res.status}).`);
+  revokeAccessToken(userId, tokenId);
 }
 
 export async function logPromptHistory(
@@ -443,25 +337,16 @@ export async function logPromptHistory(
   originalPrompt: string,
   enhancedPrompt: string,
   mode: string,
-  category: string
+  category: string,
+  providerId?: string
 ): Promise<void> {
-  const env = getSupabaseEnv();
-  if (!env) return;
-  void fetch(`${env.url}/rest/v1/prompt_history`, {
-    method: 'POST',
-    headers: {
-      apikey: env.key,
-      Authorization: `Bearer ${env.key}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      user_id: userId,
-      original_prompt: originalPrompt,
-      enhanced_prompt: enhancedPrompt,
-      mode,
-      category
-    }),
-    signal: AbortSignal.timeout(8_000)
+  recordPromptHistory({
+    userId,
+    originalPrompt,
+    enhancedPrompt,
+    mode,
+    category,
+    ...(providerId ? { providerId } : {})
   });
 }
 

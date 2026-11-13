@@ -54,3 +54,4 @@ export function generatePromptPilotToken(): { token: string; prefix: string; has
   const hash = hashToken(token);
   return { token, prefix, hash };
 }
+

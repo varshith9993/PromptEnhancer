@@ -270,6 +270,7 @@ export function parseInlineInstructions(raw: string): {
       if (trimmed) blocks.push(trimmed);
       return ' ';
     })
+    .replace(/^\s*\/enhance\b[:\s]*/i, '')
     .replace(/\s+/g, ' ')
     .trim();
   return { prompt, inlineInstructions: blocks.join('\n') };

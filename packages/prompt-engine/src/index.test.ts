@@ -37,8 +37,8 @@ test('enhancePromptRuleBased preserves original prompt and merges instructions',
   assert.doesNotMatch(result.enhancedPrompt, /Disabled rule/);
 });
 
-test('parseInlineInstructions extracts multiple ///.../// blocks', () => {
-  const parsed = parseInlineInstructions('Fix login ///Keep OAuth intact/// and make fast ///Do not break tests///');
+test('parseInlineInstructions extracts multiple ///.../// blocks and strips /enhance prefix', () => {
+  const parsed = parseInlineInstructions('/enhance Fix login ///Keep OAuth intact/// and make fast ///Do not break tests///');
   assert.equal(parsed.prompt, 'Fix login and make fast');
   assert.equal(parsed.inlineInstructions, 'Keep OAuth intact\nDo not break tests');
 });

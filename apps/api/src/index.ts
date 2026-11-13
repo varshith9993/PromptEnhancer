@@ -18,6 +18,7 @@ import {
   fetchUserPreferences,
   fetchUserProfiles,
   getUserDecryptedApiKey,
+  getUserDefaultHealthyKey,
   insertUserProfile,
   logPromptHistory,
   replaceUserPreferences,
@@ -142,20 +143,26 @@ export async function handleRequest(
 
       // If user is authenticated and has stored provider credentials, use their configured AI provider
       if (user && parsed.mode !== 'free') {
-        const preferredProvider = parsed.providerId || 'freellmapi';
-        let keyConfig = await getUserDecryptedApiKey(user.id, preferredProvider);
-        if (!keyConfig && preferredProvider !== 'gemini') {
-          keyConfig = await getUserDecryptedApiKey(user.id, 'gemini');
-        }
-        if (!keyConfig && preferredProvider !== 'groq') {
-          keyConfig = await getUserDecryptedApiKey(user.id, 'groq');
-        }
-        if (!keyConfig && preferredProvider !== 'openrouter') {
-          keyConfig = await getUserDecryptedApiKey(user.id, 'openrouter');
+        const preferredProvider = parsed.providerId;
+        let keyConfig = preferredProvider
+          ? await getUserDecryptedApiKey(user.id, preferredProvider)
+          : null;
+        let resolvedProvider = preferredProvider;
+
+        if (!keyConfig) {
+          const defaultKey = await getUserDefaultHealthyKey(user.id);
+          if (defaultKey) {
+            keyConfig = {
+              apiKey: defaultKey.apiKey,
+              ...(defaultKey.baseUrl ? { baseUrl: defaultKey.baseUrl } : {}),
+              ...(defaultKey.modelId ? { modelId: defaultKey.modelId } : {})
+            };
+            resolvedProvider = defaultKey.providerId;
+          }
         }
 
-        if (keyConfig) {
-          const providerId = (parsed.providerId as ByokProviderId) || 'freellmapi';
+        if (keyConfig && resolvedProvider) {
+          const providerId = resolvedProvider as ByokProviderId;
           const result = await enhancePromptWithByok(
             { ...parsed, originalPrompt: parsed.originalPrompt, mode: 'byok' },
             {
@@ -165,7 +172,7 @@ export async function handleRequest(
               ...(keyConfig.baseUrl ? { baseUrl: keyConfig.baseUrl } : {})
             }
           );
-          void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category);
+          void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category, providerId);
           sendJson(res, 200, result);
           return;
         }
@@ -319,19 +326,46 @@ export async function handleRequest(
           baseUrl?: string;
           modelId?: string;
           label?: string;
+          skipTest?: boolean;
         };
         if (!body.providerId || !body.apiKey) {
           sendJson(res, 400, { error: 'providerId and apiKey are required' });
           return;
         }
+
+        // Live connection test before saving (matching FreeLLMAPI)
+        let testResult: { ok: boolean; model: string; models: string[] } | null = null;
+        if (!body.skipTest) {
+          try {
+            testResult = await testByokConnection({
+              providerId: body.providerId as ByokProviderId,
+              apiKey: body.apiKey,
+              ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
+              ...(body.modelId ? { modelId: body.modelId } : {})
+            });
+          } catch (testErr) {
+            sendJson(res, 400, {
+              error: `Provider test failed: ${testErr instanceof Error ? testErr.message : 'Invalid key or connection failed'}`
+            });
+            return;
+          }
+        }
+
+        const finalModelId = testResult?.model || body.modelId;
         await saveUserApiKey(token, user, {
           providerId: body.providerId,
           apiKey: body.apiKey,
           ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
-          ...(body.modelId ? { modelId: body.modelId } : {}),
-          ...(body.label ? { label: body.label } : {})
+          ...(finalModelId ? { modelId: finalModelId } : {}),
+          ...(body.label ? { label: body.label } : {}),
+          status: 'healthy'
         });
-        sendJson(res, 200, { ok: true });
+        sendJson(res, 200, {
+          ok: true,
+          status: 'healthy',
+          model: testResult?.model,
+          models: testResult?.models ?? []
+        });
         return;
       }
       if (method === 'DELETE') {
