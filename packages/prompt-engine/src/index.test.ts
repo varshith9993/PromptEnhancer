@@ -66,13 +66,13 @@ test('enhancePromptWithFallback skips failing provider and succeeds on next', as
 
   try {
     const res = await enhancePromptWithFallback(
-      { originalPrompt: 'Fix auth', mode: 'byok' },
+      { originalPrompt: 'Fix auth ///Keep OAuth///', mode: 'byok' },
       [
         { providerId: 'groq', apiKey: 'k1' },
-        { providerId: 'pollinations', apiKey: '' }
+        { providerId: 'openrouter', apiKey: 'k2' }
       ]
     );
-    assert.equal(res.usedProvider, 'pollinations');
+    assert.equal(res.usedProvider, 'openrouter');
     assert.equal(res.attempts.length, 2);
     assert.equal(res.attempts[0]?.ok, false);
     assert.equal(res.attempts[1]?.ok, true);

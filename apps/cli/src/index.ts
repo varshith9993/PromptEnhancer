@@ -151,7 +151,7 @@ async function run(): Promise<number> {
     console.log('PromptPilot CLI Setup');
     console.log(`Current config: mode=${cfg.mode}, provider=${cfg.provider}, agent=${cfg.agent}`);
     console.log('1. Free mode: promptpilot config set mode free');
-    console.log('2. No-key LLM: promptpilot enhance "Fix bug" --mode byok --provider pollinations');
+    console.log('2. No-key LLM: promptpilot enhance "Fix bug" --mode byok --provider aihorde');
     console.log('3. Keyed BYOK: promptpilot key set gemini && promptpilot config set mode byok');
     return 0;
   }
@@ -185,7 +185,7 @@ async function run(): Promise<number> {
     const activeMode = (values.mode || cfg.mode) as 'free' | 'byok';
     const activeAgent = (values.agent || cfg.agent || 'generic') as TargetAgent;
     const activeProfile = values.profile || cfg.profile;
-    const activeProvider = (values.provider || cfg.provider || 'pollinations') as ByokProviderId;
+    const activeProvider = (values.provider || cfg.provider || 'aihorde') as ByokProviderId;
     const activeModel = values.model || cfg.model;
 
     const baseRequest = {

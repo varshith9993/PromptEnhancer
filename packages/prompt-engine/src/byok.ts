@@ -13,7 +13,6 @@ export type ByokProviderId =
   | 'cerebras'
   | 'sambanova'
   | 'ovh'
-  | 'pollinations'
   | 'aihorde'
   | 'openai-compatible';
 
@@ -109,19 +108,11 @@ export const BYOK_PROVIDERS: readonly ByokProviderMeta[] = [
   },
   {
     id: 'ovh',
-    name: 'OVH AI Endpoints (Free/Keyed)',
-    requiresKey: false,
+    name: 'OVH AI Endpoints',
+    requiresKey: true,
     defaultBaseUrl: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1',
     defaultModel: 'Meta-Llama-3_3-70B-Instruct',
     models: ['Meta-Llama-3_3-70B-Instruct', 'Mistral-Nemo-Instruct-2407', 'Qwen2.5-Coder-32B-Instruct']
-  },
-  {
-    id: 'pollinations',
-    name: 'Pollinations (No Key)',
-    requiresKey: false,
-    defaultBaseUrl: 'https://text.pollinations.ai/openai',
-    defaultModel: 'openai',
-    models: ['openai', 'mistral', 'llama']
   },
   {
     id: 'aihorde',
@@ -181,8 +172,23 @@ function buildSystemPrompt(request: EnhanceRequest): string {
     .join('\n\n');
 }
 
+export function parseInlineInstructionsForByok(raw: string): {
+  prompt: string;
+  inlineInstructions: string;
+} {
+  const match = raw.match(/\/\/\/([\s\S]*?)\/\/\//);
+  if (!match) return { prompt: raw.trim(), inlineInstructions: '' };
+  return {
+    prompt: raw.replace(match[0], '').trim(),
+    inlineInstructions: (match[1] ?? '').trim()
+  };
+}
+
 function buildUserPrompt(request: EnhanceRequest): string {
-  const extra = request.additionalInstructions?.trim();
+  const parsed = parseInlineInstructionsForByok(request.originalPrompt);
+  const enhancerDirectives = [parsed.inlineInstructions, request.additionalInstructions?.trim()]
+    .filter(Boolean)
+    .join('\n');
   const ctx = request.projectContext;
   const contextParts: string[] = [];
 
@@ -204,8 +210,10 @@ function buildUserPrompt(request: EnhanceRequest): string {
   }
 
   return [
-    `Original prompt:\n${request.originalPrompt.trim()}`,
-    extra ? `Additional instructions:\n${extra}` : '',
+    `Original prompt for the building AI:\n${parsed.prompt}`,
+    enhancerDirectives
+      ? `Instructions for YOU (how to enhance the prompt above — do not copy these literally as a separate feature unless relevant):\n${enhancerDirectives}`
+      : '',
     contextParts.length ? `Project context:\n${contextParts.join('\n\n')}` : '',
     'Return only the enhanced prompt in clean Markdown with Objective, Requirements/Guidance, Constraints, and Verification sections where appropriate.'
   ]
@@ -260,8 +268,14 @@ async function callAiHorde(
     if (!statusRes.ok) continue;
     const status = (await statusRes.json()) as {
       done?: boolean;
+      faulted?: boolean;
+      is_possible?: boolean;
       generations?: Array<{ text?: string }>;
     };
+    if (status.faulted) throw new Error('AI Horde worker faulted.');
+    if (status.is_possible === false) {
+      throw new Error('No AI Horde worker currently available for this model.');
+    }
     if (status.done) {
       const text = status.generations?.[0]?.text?.trim();
       if (!text) throw new Error('AI Horde returned an empty response.');

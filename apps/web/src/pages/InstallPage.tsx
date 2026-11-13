@@ -39,8 +39,8 @@ export function InstallPage() {
 
   const localRunCmd =
     os === 'windows'
-      ? `git clone <your-repo-url> PromptEnhancer\ncd PromptEnhancer\nnpm install\nnpm run build\nnode apps/cli/dist/index.js enhance "Change the UI look"`
-      : `git clone <your-repo-url> PromptEnhancer\ncd PromptEnhancer\nnpm install\nnpm run build\nnode apps/cli/dist/index.js enhance "Change the UI look"`;
+      ? `git clone https://github.com/varshith9993/PromptEnhancer.git\ncd PromptEnhancer\nnpm install\nnpm run build\nnode apps/cli/dist/index.js enhance "Change the UI look"`
+      : `git clone https://github.com/varshith9993/PromptEnhancer.git\ncd PromptEnhancer\nnpm install\nnpm run build\nnode apps/cli/dist/index.js enhance "Change the UI look"`;
 
   const editorCmd =
     editor === 'claude-code'

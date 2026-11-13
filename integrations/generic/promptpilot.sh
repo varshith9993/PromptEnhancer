@@ -7,7 +7,7 @@ PROMPTPILOT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 enhance() {
   local prompt="$1"
   local mode="${2:-free}"
-  local provider="${3:-pollinations}"
+  local provider="${3:-aihorde}"
   local output
   output="$(node "$PROMPTPILOT_ROOT/apps/cli/dist/index.js" enhance "$prompt" --mode "$mode" --provider "$provider")" || return 1
 

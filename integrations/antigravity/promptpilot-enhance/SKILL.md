@@ -1,21 +1,20 @@
 ---
 name: promptpilot-enhance
-description: Enhance a rough developer prompt using PromptPilot (supports ///additional instructions///) and present it for review before executing.
+description: Trigger ONLY when the user explicitly invokes /enhance or /promptpilot-enhance. Normal text is the prompt for the building AI; ///.../// tells the prompt-enhancing AI how to enhance it.
 ---
 
 # PromptPilot Enhance Skill
 
-When the user asks to enhance a prompt or uses `/promptpilot-enhance`:
+Only activate this skill when the user explicitly invokes `/enhance` or `/promptpilot-enhance`. Do not intercept normal coding requests.
 
-1. Extract the original prompt and any `///...///` inline instructions.
-2. Run the PromptPilot CLI in the workspace:
+1. Keep normal text as the prompt for the building AI, and treat any `///...///` block as instructions for how to enhance that prompt.
+2. Run the PromptPilot CLI:
    ```bash
    node apps/cli/dist/index.js enhance "<user prompt>" --agent antigravity
    ```
-   To use a free no-key LLM or BYOK provider instead of rule-based mode:
+   For free no-key LLM enhancement via AI Horde:
    ```bash
-   node apps/cli/dist/index.js enhance "<user prompt>" --mode byok --provider pollinations --agent antigravity
+   node apps/cli/dist/index.js enhance "<user prompt>" --mode byok --provider aihorde --agent antigravity
    ```
-3. Show the enhanced prompt to the user so they can **Apply**, **Edit**, **Retry**, or **Undo** it.
+3. Present the enhanced prompt for user review (**Apply**, **Edit**, **Retry**, or **Undo**).
 4. Never execute the enhanced coding instructions automatically until the user confirms.
-

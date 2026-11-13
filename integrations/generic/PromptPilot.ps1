@@ -8,13 +8,13 @@ function enhance {
     [Parameter(Mandatory = $true, Position = 0)]
     [string]$Prompt,
     [string]$Mode = "free",
-    [string]$Provider = "pollinations",
+    [string]$Provider = "aihorde",
     [string]$UserSelectedProfile = ""
   )
 
   $cli = Join-Path $script:PromptPilotRoot "apps\cli\dist\index.js"
   $argsList = @($cli, "enhance", $Prompt, "--mode", $Mode, "--provider", $Provider)
-  if ($Profile) { $argsList += @("--profile", $Profile) }
+  if ($UserSelectedProfile) { $argsList += @("--profile", $UserSelectedProfile) }
 
   $output = & node @argsList
   if ($LASTEXITCODE -eq 0) {

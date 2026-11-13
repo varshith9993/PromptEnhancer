@@ -18,7 +18,7 @@ export interface CliConfig {
 
 const DEFAULT_CONFIG: CliConfig = {
   mode: 'free',
-  provider: 'pollinations',
+  provider: 'aihorde',
   model: '',
   agent: 'generic',
   profile: ''
