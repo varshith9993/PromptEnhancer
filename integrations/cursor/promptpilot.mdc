@@ -22,3 +22,4 @@ When the user starts a message with `/enhance`, treat everything after `/enhance
 3. Output the enhanced prompt and wait for the user to confirm or edit before executing.
 
 IMPORTANT: Only activate on `/enhance`. Normal messages should be handled normally by Cursor.
+

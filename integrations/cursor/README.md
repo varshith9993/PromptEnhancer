@@ -59,3 +59,4 @@ Add to your shell profile (see `integrations/generic/promptpilot.sh` or `PromptP
 # In Cursor's integrated terminal:
 enhance "Fix the auth bug ///Keep session handling intact///"
 ```
+

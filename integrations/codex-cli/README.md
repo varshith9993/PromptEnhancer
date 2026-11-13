@@ -34,3 +34,4 @@ promptpilot enhance "your prompt" --agent codex-cli
 ### Option 3: Shell function
 
 Add to your shell profile (see `integrations/generic/promptpilot.sh` or `PromptPilot.ps1`).
+

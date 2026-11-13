@@ -13,6 +13,7 @@ async function invoke(method: string, url: string, body?: unknown): Promise<{
   req.method = method;
   req.url = url;
   req.headers = {};
+  (req as unknown as { socket: { remoteAddress: string } }).socket = { remoteAddress: '127.0.0.1' };
 
   let status = 200;
   let raw = '';

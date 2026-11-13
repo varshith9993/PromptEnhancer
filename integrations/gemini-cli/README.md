@@ -46,3 +46,4 @@ promptpilot enhance "your prompt" --agent gemini-cli
 ### Option 3: Shell function
 
 Add to `~/.bashrc` or `~/.zshrc` (see `integrations/generic/promptpilot.sh`).
+

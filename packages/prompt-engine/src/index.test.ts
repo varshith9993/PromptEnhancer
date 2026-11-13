@@ -5,7 +5,11 @@ import {
   enhancePromptWithFallback,
   inferTaskCategory,
   parseInlineInstructions,
-  validateExternalBaseUrl
+  validateExternalBaseUrl,
+  expandVagueTerms,
+  buildMetaSystemPrompt,
+  cleanAiOutput,
+  rankCategories
 } from './index.js';
 
 test('inferTaskCategory detects UI/UX prompts', () => {
@@ -33,11 +37,43 @@ test('enhancePromptRuleBased preserves original prompt and merges instructions',
   assert.doesNotMatch(result.enhancedPrompt, /Disabled rule/);
 });
 
-test('parseInlineInstructions extracts ///.../// block', () => {
-  const parsed = parseInlineInstructions('Fix login ///Keep OAuth intact///');
-  assert.equal(parsed.prompt, 'Fix login');
-  assert.equal(parsed.inlineInstructions, 'Keep OAuth intact');
+test('parseInlineInstructions extracts multiple ///.../// blocks', () => {
+  const parsed = parseInlineInstructions('Fix login ///Keep OAuth intact/// and make fast ///Do not break tests///');
+  assert.equal(parsed.prompt, 'Fix login and make fast');
+  assert.equal(parsed.inlineInstructions, 'Keep OAuth intact\nDo not break tests');
 });
+
+test('expandVagueTerms turns vague adjectives into concrete criteria', () => {
+  const criteria = expandVagueTerms('Make this page modern, clean and fast');
+  assert.ok(criteria.length >= 3);
+  assert.ok(criteria.some((c) => c.includes('spacing scale')));
+  assert.ok(criteria.some((c) => c.includes('whitespace')));
+  assert.ok(criteria.some((c) => c.includes('Measure first')));
+});
+
+test('cleanAiOutput removes fences and chat preambles', () => {
+  const raw = 'Sure! Here is the enhanced prompt:\n\n## Objective\nFix the bug.\n\nHope this helps!';
+  assert.equal(cleanAiOutput(raw), '## Objective\nFix the bug.');
+
+  const fenced = '```markdown\n## Objective\nFix it.\n```';
+  assert.equal(cleanAiOutput(fenced), '## Objective\nFix it.');
+});
+
+test('buildMetaSystemPrompt returns comprehensive instructions', () => {
+  const prompt = buildMetaSystemPrompt();
+  assert.match(prompt, /PromptPilot/);
+  assert.match(prompt, /<building_prompt>/);
+  assert.match(prompt, /<enhancer_instructions>/);
+});
+
+test('rankCategories returns ranked categories', () => {
+  const ranked = rankCategories('Fix the bug in the authentication database query');
+  assert.ok(ranked.length >= 2);
+  assert.ok(ranked.includes('bug_fix'));
+  assert.ok(ranked.includes('auth'));
+  assert.ok(ranked.includes('database'));
+});
+
 
 test('validateExternalBaseUrl blocks private/http URLs and allows https', () => {
   assert.equal(validateExternalBaseUrl('https://api.openai.com/v1/'), 'https://api.openai.com/v1');

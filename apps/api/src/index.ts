@@ -19,10 +19,33 @@ import {
 
 const WEB_ORIGIN = process.env.WEB_ORIGIN ?? 'http://localhost:5173';
 
+// Simple in-memory rate limiter: max requests per IP per window.
+// shortcut: in-memory only, resets on restart; swap to Redis when scaling.
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_REQUESTS = 30;
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    rateBuckets.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  bucket.count += 1;
+  return bucket.count > RATE_MAX_REQUESTS;
+}
+
 function setCors(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', WEB_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+}
+
+function setSecurityHeaders(res: http.ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
 }
 
 function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
@@ -57,6 +80,8 @@ export async function handleRequest(
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
 
+  setSecurityHeaders(res);
+
   if (method === 'OPTIONS') {
     setCors(res);
     res.writeHead(204);
@@ -85,11 +110,20 @@ export async function handleRequest(
   }
 
   if (method === 'POST' && url === '/api/enhance') {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    if (isRateLimited(ip)) {
+      sendJson(res, 429, { error: 'Too many requests. Try again in a minute.' });
+      return;
+    }
     try {
       const raw = await readBody(req);
       const parsed = JSON.parse(raw) as Partial<EnhanceRequest>;
       if (!parsed.originalPrompt || typeof parsed.originalPrompt !== 'string') {
         sendJson(res, 400, { error: 'originalPrompt is required' });
+        return;
+      }
+      if (parsed.originalPrompt.length > 10_000) {
+        sendJson(res, 400, { error: 'Prompt too long (max 10,000 characters)' });
         return;
       }
       const result = enhancePromptRuleBased({
@@ -106,6 +140,11 @@ export async function handleRequest(
   }
 
   if (method === 'POST' && url === '/api/byok/test') {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    if (isRateLimited(ip)) {
+      sendJson(res, 429, { error: 'Too many requests. Try again in a minute.' });
+      return;
+    }
     try {
       const raw = await readBody(req);
       const config = JSON.parse(raw) as Partial<ByokConfig>;
@@ -126,6 +165,11 @@ export async function handleRequest(
   }
 
   if (method === 'POST' && url === '/api/byok/enhance') {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    if (isRateLimited(ip)) {
+      sendJson(res, 429, { error: 'Too many requests. Try again in a minute.' });
+      return;
+    }
     try {
       const raw = await readBody(req);
       const body = JSON.parse(raw) as {
