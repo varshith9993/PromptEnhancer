@@ -105,7 +105,38 @@ export async function setProviderKey(provider: string, apiKey: string): Promise<
   });
 }
 
+export async function tryReadLocalFreeLlmApiKey(): Promise<string> {
+  try {
+    const appData =
+      process.env.APPDATA ||
+      (process.platform === 'darwin'
+        ? path.join(os.homedir(), 'Library', 'Application Support')
+        : path.join(os.homedir(), '.config'));
+    const dbPath = path.join(appData, 'FreeLLMAPI', 'freeapi.db');
+    const { existsSync } = await import('node:fs');
+    if (!existsSync(dbPath)) return '';
+    const { DatabaseSync } = (await import('node:sqlite')) as {
+      DatabaseSync: new (
+        path: string,
+        opts?: { readOnly?: boolean }
+      ) => { prepare: (sql: string) => { get: () => unknown } };
+    };
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db.prepare("SELECT value FROM settings WHERE key='unified_api_key'").get() as
+      | { value?: string }
+      | undefined;
+    return row?.value?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export async function getProviderKey(provider: string): Promise<string | null> {
+  if (provider === 'freellmapi') {
+    const auto = await tryReadLocalFreeLlmApiKey();
+    if (auto) return auto;
+  }
+
   if (process.platform === 'win32') {
     try {
       const encrypted = (await readFile(dpapiKeyPath(provider), 'utf8')).trim();

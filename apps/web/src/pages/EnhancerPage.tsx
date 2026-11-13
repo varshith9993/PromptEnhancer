@@ -119,6 +119,9 @@ export function EnhancerPage() {
     const meta = BYOK_PROVIDERS.find((p) => p.id === nextId);
     setModelId(meta?.defaultModel ?? '');
     setLiveModels([]);
+    setCustomBaseUrl(
+      meta?.id === 'openai-compatible' || meta?.id === 'freellmapi' ? meta.defaultBaseUrl : ''
+    );
     setConnStatus('');
   }
 
@@ -367,6 +370,17 @@ export function EnhancerPage() {
               Your API key stays in memory for this tab only and is never saved to disk or database.
             </span>
           </div>
+
+          {providerId === 'freellmapi' && (
+            <div className="p-3 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs flex items-center justify-between gap-3">
+              <div>
+                <strong>FreeLLMAPI Unified Router:</strong> Routes across 80+ free models (Google AI Studio, NVIDIA NIM, OpenRouter, Kilo, OVH, AI Horde) with automatic failover at <code className="px-1 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50">http://127.0.0.1:31415</code>.
+                <div className="text-[11px] opacity-90 mt-0.5">
+                  Paste your Unified API Key from the FreeLLMAPI desktop app (under the <em>Keys</em> tab).
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             <label className="space-y-1 block">

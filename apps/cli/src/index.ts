@@ -143,6 +143,20 @@ async function run(): Promise<number> {
     console.log(`Platform: ${process.platform} (${process.arch})`);
     console.log(`Default Mode: ${cfg.mode} | Provider: ${cfg.provider}`);
     console.log(`Available Providers: ${BYOK_PROVIDERS.map((p) => p.id).join(', ')}`);
+
+    try {
+      const res = await fetch('http://127.0.0.1:31415/v1/models', {
+        signal: AbortSignal.timeout(1000)
+      });
+      if (res.status === 200 || res.status === 401) {
+        const storedKey = await getProviderKey('freellmapi');
+        console.log(
+          `FreeLLMAPI Local Router: DETECTED on http://127.0.0.1:31415 (running${storedKey ? ', key auto-detected' : ', key needed'})`
+        );
+      }
+    } catch {
+      console.log('FreeLLMAPI Local Router: Not running (port 31415 idle)');
+    }
     return 0;
   }
 
@@ -150,9 +164,10 @@ async function run(): Promise<number> {
     const cfg = await loadCliConfig();
     console.log('PromptPilot CLI Setup');
     console.log(`Current config: mode=${cfg.mode}, provider=${cfg.provider}, agent=${cfg.agent}`);
-    console.log('1. Free mode: promptpilot config set mode free');
-    console.log('2. No-key LLM: promptpilot enhance "Fix bug" --mode byok --provider aihorde');
-    console.log('3. Keyed BYOK: promptpilot key set gemini && promptpilot config set mode byok');
+    console.log('1. Free rule-based mode: promptpilot config set mode free');
+    console.log('2. FreeLLMAPI local router (80+ models): promptpilot config set mode byok && promptpilot config set provider freellmapi');
+    console.log('3. AI Horde (no key, remote): promptpilot enhance "Fix bug" --mode byok --provider aihorde');
+    console.log('4. Keyed BYOK: promptpilot key set gemini && promptpilot config set mode byok');
     return 0;
   }
 

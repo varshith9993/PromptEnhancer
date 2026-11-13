@@ -11,6 +11,7 @@ import {
 } from './rules.js';
 
 export type ByokProviderId =
+  | 'freellmapi'
   | 'openrouter'
   | 'gemini'
   | 'groq'
@@ -35,6 +36,25 @@ export interface ByokProviderMeta {
 }
 
 export const BYOK_PROVIDERS: readonly ByokProviderMeta[] = [
+  {
+    id: 'freellmapi',
+    name: 'FreeLLMAPI (Unified Local Router)',
+    requiresKey: true,
+    defaultBaseUrl: 'http://127.0.0.1:31415/v1',
+    defaultModel: 'auto',
+    models: [
+      'auto',
+      'fusion',
+      'gemini-flash',
+      'claude-sonnet-4-5',
+      'claude-opus-4-5',
+      'claude-haiku-4-5',
+      'gemini-3.8-flash',
+      'gemini-3.7-flash',
+      'gemma-4-31b-it',
+      'north-mini-code'
+    ]
+  },
   {
     id: 'openrouter',
     name: 'OpenRouter',
@@ -148,15 +168,25 @@ export interface ByokConfig {
   baseUrl?: string;
 }
 
-const PRIVATE_HOST_RE = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0|\[::1\])/i;
+const CLOUD_METADATA_RE = /^(169\.254\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.0\.0\.0)/;
 
 export function validateExternalBaseUrl(rawUrl: string): string {
   const parsed = new URL(rawUrl);
+  const isLoopback =
+    parsed.hostname === 'localhost' ||
+    parsed.hostname === '127.0.0.1' ||
+    parsed.hostname === '[::1]';
+  if (isLoopback) {
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('Local router endpoints must use HTTP or HTTPS.');
+    }
+    return parsed.toString().replace(/\/+$/, '');
+  }
   if (parsed.protocol !== 'https:') {
     throw new Error('Custom endpoint must use HTTPS.');
   }
-  if (PRIVATE_HOST_RE.test(parsed.hostname)) {
-    throw new Error('Private or loopback endpoints are blocked.');
+  if (CLOUD_METADATA_RE.test(parsed.hostname)) {
+    throw new Error('Private or cloud metadata endpoints are blocked.');
   }
   return parsed.toString().replace(/\/+$/, '');
 }

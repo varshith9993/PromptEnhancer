@@ -75,11 +75,14 @@ test('rankCategories returns ranked categories', () => {
 });
 
 
-test('validateExternalBaseUrl blocks private/http URLs and allows https', () => {
+test('validateExternalBaseUrl allows local routers and https, blocks cloud metadata', () => {
   assert.equal(validateExternalBaseUrl('https://api.openai.com/v1/'), 'https://api.openai.com/v1');
+  assert.equal(validateExternalBaseUrl('http://127.0.0.1:31415/v1'), 'http://127.0.0.1:31415/v1');
+  assert.equal(validateExternalBaseUrl('http://localhost:31415/v1'), 'http://localhost:31415/v1');
   assert.throws(() => validateExternalBaseUrl('http://api.openai.com/v1'));
-  assert.throws(() => validateExternalBaseUrl('https://127.0.0.1:8080/v1'));
-  assert.throws(() => validateExternalBaseUrl('https://localhost/v1'));
+  assert.throws(() => validateExternalBaseUrl('https://169.254.169.254/v1'));
+  assert.throws(() => validateExternalBaseUrl('https://10.0.0.1/v1'));
+  assert.throws(() => validateExternalBaseUrl('ftp://127.0.0.1/v1'));
 });
 
 test('enhancePromptRuleBased rejects empty prompt', () => {
