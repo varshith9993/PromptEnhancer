@@ -3,6 +3,7 @@ import type http from 'node:http';
 import { Readable } from 'node:stream';
 import test from 'node:test';
 import { handleRequest } from './index.js';
+import { decryptApiKey, encryptApiKey, generatePromptPilotToken, hashToken } from './crypto.js';
 
 async function invoke(method: string, url: string, body?: unknown): Promise<{
   status: number;
@@ -50,6 +51,27 @@ test('API core routes: /health, /api/plans, /api/enhance, and 401 on protected r
   const unauth = await invoke('GET', '/api/me/preferences');
   assert.equal(unauth.status, 401);
 
+  const unauthKeys = await invoke('GET', '/api/me/keys');
+  assert.equal(unauthKeys.status, 401);
+
+  const unauthTokens = await invoke('GET', '/api/me/tokens');
+  assert.equal(unauthTokens.status, 401);
+
   const badByok = await invoke('POST', '/api/byok/enhance', {});
   assert.equal(badByok.status, 400);
+});
+
+test('crypto: AES-256-GCM encryption, decryption and PromptPilot token generation', () => {
+  const secretKey = 'sk-or-v1-my-secret-openrouter-key-123456';
+  const enc = encryptApiKey(secretKey);
+  assert.notEqual(enc.encrypted, secretKey);
+  assert.ok(enc.iv && enc.authTag);
+
+  const dec = decryptApiKey(enc);
+  assert.equal(dec, secretKey);
+
+  const { token, prefix, hash } = generatePromptPilotToken();
+  assert.match(token, /^pp_live_[a-f0-9]{48}$/);
+  assert.match(prefix, /^pp_live_[a-f0-9]{6}\.\.\.[a-f0-9]{4}$/);
+  assert.equal(hashToken(token), hash);
 });

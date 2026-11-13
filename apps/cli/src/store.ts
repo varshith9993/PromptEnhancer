@@ -14,14 +14,17 @@ export interface CliConfig {
   model: string;
   agent: TargetAgent;
   profile: string;
+  token?: string | undefined;
+  apiUrl?: string | undefined;
 }
 
 const DEFAULT_CONFIG: CliConfig = {
   mode: 'free',
-  provider: 'aihorde',
-  model: '',
+  provider: 'freellmapi',
+  model: 'auto',
   agent: 'generic',
-  profile: ''
+  profile: '',
+  apiUrl: 'http://localhost:4000'
 };
 
 function configDir(): string {

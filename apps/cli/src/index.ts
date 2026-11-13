@@ -61,7 +61,15 @@ async function handleConfig(args: string[]): Promise<number> {
       console.error(`Unknown provider "${val}".`);
       return 1;
     }
-    const validKeys: Array<keyof CliConfig> = ['mode', 'provider', 'model', 'agent', 'profile'];
+    const validKeys: Array<keyof CliConfig> = [
+      'mode',
+      'provider',
+      'model',
+      'agent',
+      'profile',
+      'token',
+      'apiUrl'
+    ];
     if (!validKeys.includes(key)) {
       console.error(`Unknown config key "${key}".`);
       return 1;
@@ -126,7 +134,9 @@ async function run(): Promise<number> {
       file: { type: 'string', short: 'f', default: '' },
       extra: { type: 'string', default: '' },
       key: { type: 'string', default: '' },
-      'base-url': { type: 'string', default: '' }
+      'base-url': { type: 'string', default: '' },
+      token: { type: 'string', default: '' },
+      'api-url': { type: 'string', default: '' }
     }
   });
 
@@ -209,6 +219,42 @@ async function run(): Promise<number> {
       ...(activeProfile ? { profileId: activeProfile } : {}),
       ...(values.extra ? { additionalInstructions: values.extra } : {})
     };
+
+    const apiToken = (values.token || cfg.token || process.env.PROMPTPILOT_TOKEN || '').trim();
+    if (apiToken) {
+      const apiUrl = (
+        values['api-url'] ||
+        cfg.apiUrl ||
+        process.env.PROMPTPILOT_API_URL ||
+        'http://localhost:4000'
+      ).replace(/\/+$/, '');
+      try {
+        const res = await fetch(`${apiUrl}/api/enhance`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiToken}`
+          },
+          body: JSON.stringify({
+            ...baseRequest,
+            mode: activeMode,
+            providerId: activeProvider
+          }),
+          signal: AbortSignal.timeout(60_000)
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { enhancedPrompt?: string };
+          if (data.enhancedPrompt) {
+            console.log(data.enhancedPrompt);
+            return 0;
+          }
+        }
+      } catch (err) {
+        console.error(
+          `Notice: Remote backend at ${apiUrl} unreachable, falling back to local engine (${err instanceof Error ? err.message : 'timeout'}).`
+        );
+      }
+    }
 
     if (activeMode === 'free') {
       const result = enhancePromptRuleBased({ ...baseRequest, mode: 'free' });

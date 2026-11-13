@@ -6,14 +6,23 @@ import {
   enhancePromptRuleBased,
   enhancePromptWithByok,
   testByokConnection,
-  type ByokConfig
+  type ByokConfig,
+  type ByokProviderId
 } from '@promptpilot/prompt-engine';
 import type { EnhanceRequest, PromptProfile, UserInstruction } from '@promptpilot/shared';
 import {
+  createUserAccessToken,
+  deleteUserApiKey,
+  fetchUserAccessTokens,
+  fetchUserApiKeys,
   fetchUserPreferences,
   fetchUserProfiles,
+  getUserDecryptedApiKey,
   insertUserProfile,
+  logPromptHistory,
   replaceUserPreferences,
+  revokeUserAccessToken,
+  saveUserApiKey,
   verifySupabaseUser
 } from './supabase-auth.js';
 
@@ -110,14 +119,14 @@ export async function handleRequest(
   }
 
   if (method === 'POST' && url === '/api/enhance') {
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || 'unknown';
     if (isRateLimited(ip)) {
       sendJson(res, 429, { error: 'Too many requests. Try again in a minute.' });
       return;
     }
     try {
       const raw = await readBody(req);
-      const parsed = JSON.parse(raw) as Partial<EnhanceRequest>;
+      const parsed = JSON.parse(raw) as Partial<EnhanceRequest> & { providerId?: string };
       if (!parsed.originalPrompt || typeof parsed.originalPrompt !== 'string') {
         sendJson(res, 400, { error: 'originalPrompt is required' });
         return;
@@ -126,11 +135,50 @@ export async function handleRequest(
         sendJson(res, 400, { error: 'Prompt too long (max 10,000 characters)' });
         return;
       }
+
+      // Check for authenticated user (via JWT or personal pp_live_ token)
+      const authHeader = req.headers.authorization;
+      const user = await verifySupabaseUser(authHeader);
+
+      // If user is authenticated and has stored provider credentials, use their configured AI provider
+      if (user && parsed.mode !== 'free') {
+        const preferredProvider = parsed.providerId || 'freellmapi';
+        let keyConfig = await getUserDecryptedApiKey(user.id, preferredProvider);
+        if (!keyConfig && preferredProvider !== 'gemini') {
+          keyConfig = await getUserDecryptedApiKey(user.id, 'gemini');
+        }
+        if (!keyConfig && preferredProvider !== 'groq') {
+          keyConfig = await getUserDecryptedApiKey(user.id, 'groq');
+        }
+        if (!keyConfig && preferredProvider !== 'openrouter') {
+          keyConfig = await getUserDecryptedApiKey(user.id, 'openrouter');
+        }
+
+        if (keyConfig) {
+          const providerId = (parsed.providerId as ByokProviderId) || 'freellmapi';
+          const result = await enhancePromptWithByok(
+            { ...parsed, originalPrompt: parsed.originalPrompt, mode: 'byok' },
+            {
+              providerId,
+              apiKey: keyConfig.apiKey,
+              ...(keyConfig.modelId ? { modelId: keyConfig.modelId } : {}),
+              ...(keyConfig.baseUrl ? { baseUrl: keyConfig.baseUrl } : {})
+            }
+          );
+          void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category);
+          sendJson(res, 200, result);
+          return;
+        }
+      }
+
       const result = enhancePromptRuleBased({
         ...parsed,
         originalPrompt: parsed.originalPrompt,
         mode: 'free'
       });
+      if (user) {
+        void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'free', result.category);
+      }
       sendJson(res, 200, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Invalid request';
@@ -242,6 +290,104 @@ export async function handleRequest(
       }
     } catch (err) {
       sendJson(res, 400, { error: err instanceof Error ? err.message : 'Request failed' });
+      return;
+    }
+  }
+
+  if (
+    url?.startsWith('/api/me/keys') &&
+    (method === 'GET' || method === 'PUT' || method === 'DELETE')
+  ) {
+    const authHeader = req.headers.authorization;
+    const user = await verifySupabaseUser(authHeader);
+    if (!user || !authHeader?.startsWith('Bearer ')) {
+      sendJson(res, 401, { error: 'Unauthorized' });
+      return;
+    }
+    const token = authHeader.slice(7).trim();
+
+    try {
+      if (method === 'GET') {
+        const keys = await fetchUserApiKeys(token, user.id);
+        sendJson(res, 200, { keys });
+        return;
+      }
+      if (method === 'PUT') {
+        const body = JSON.parse(await readBody(req)) as {
+          providerId?: string;
+          apiKey?: string;
+          baseUrl?: string;
+          modelId?: string;
+          label?: string;
+        };
+        if (!body.providerId || !body.apiKey) {
+          sendJson(res, 400, { error: 'providerId and apiKey are required' });
+          return;
+        }
+        await saveUserApiKey(token, user, {
+          providerId: body.providerId,
+          apiKey: body.apiKey,
+          ...(body.baseUrl ? { baseUrl: body.baseUrl } : {}),
+          ...(body.modelId ? { modelId: body.modelId } : {}),
+          ...(body.label ? { label: body.label } : {})
+        });
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      if (method === 'DELETE') {
+        const parsedUrl = new URL(url, 'http://localhost');
+        const providerId = parsedUrl.searchParams.get('providerId') || url.split('/').pop();
+        if (!providerId || providerId === 'keys') {
+          sendJson(res, 400, { error: 'providerId is required' });
+          return;
+        }
+        await deleteUserApiKey(token, user.id, providerId);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+    } catch (err) {
+      sendJson(res, 400, { error: err instanceof Error ? err.message : 'Key operation failed' });
+      return;
+    }
+  }
+
+  if (
+    url?.startsWith('/api/me/tokens') &&
+    (method === 'GET' || method === 'POST' || method === 'DELETE')
+  ) {
+    const authHeader = req.headers.authorization;
+    const user = await verifySupabaseUser(authHeader);
+    if (!user || !authHeader?.startsWith('Bearer ')) {
+      sendJson(res, 401, { error: 'Unauthorized' });
+      return;
+    }
+    const token = authHeader.slice(7).trim();
+
+    try {
+      if (method === 'GET') {
+        const tokens = await fetchUserAccessTokens(token, user.id);
+        sendJson(res, 200, { tokens });
+        return;
+      }
+      if (method === 'POST') {
+        const body = JSON.parse((await readBody(req)) || '{}') as { name?: string };
+        const created = await createUserAccessToken(token, user, body.name);
+        sendJson(res, 201, created);
+        return;
+      }
+      if (method === 'DELETE') {
+        const parsedUrl = new URL(url, 'http://localhost');
+        const tokenId = parsedUrl.searchParams.get('id') || url.split('/').pop();
+        if (!tokenId || tokenId === 'tokens') {
+          sendJson(res, 400, { error: 'tokenId is required' });
+          return;
+        }
+        await revokeUserAccessToken(token, user.id, tokenId);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+    } catch (err) {
+      sendJson(res, 400, { error: err instanceof Error ? err.message : 'Token operation failed' });
       return;
     }
   }
