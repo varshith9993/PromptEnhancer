@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { INTEGRATIONS } from '@promptpilot/config';
 import { BYOK_PROVIDERS, type ByokProviderId } from '@promptpilot/prompt-engine';
-import { supabase, type AuthSession } from '../lib/supabase';
+import { getStoredAuthSession, signInDemoUser, supabase, type AuthSession } from '../lib/supabase';
 import { getApiUrl } from '../lib/config';
 
 const API_URL = getApiUrl();
@@ -27,22 +27,8 @@ interface StoredToken {
   createdAt: string;
 }
 
-const LOCAL_SESSION_KEY = 'promptpilot_local_mode_v1';
-
 export function DashboardPage() {
-  const [session, setSession] = useState<AuthSession>(() => {
-    if (localStorage.getItem(LOCAL_SESSION_KEY) === 'true') {
-      return {
-        access_token: 'local-token',
-        user: {
-          id: 'local-desktop-user',
-          email: 'desktop@localhost',
-          app_metadata: { provider: 'local-sqlite' }
-        }
-      } as unknown as AuthSession;
-    }
-    return null;
-  });
+  const [session, setSession] = useState<AuthSession>(() => getStoredAuthSession());
   const [loading, setLoading] = useState(true);
 
   // Stored provider keys
@@ -66,6 +52,11 @@ export function DashboardPage() {
   const [copiedToken, setCopiedToken] = useState(false);
 
   useEffect(() => {
+    const localSess = getStoredAuthSession();
+    if (localSess) {
+      setSession(localSess);
+      setLoading(false);
+    }
     if (!supabase) {
       setLoading(false);
       return;
@@ -79,21 +70,15 @@ export function DashboardPage() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
       if (next) {
         setSession(next);
+      } else if (!getStoredAuthSession()) {
+        setSession(null);
       }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
 
   function enableLocalMode() {
-    localStorage.setItem(LOCAL_SESSION_KEY, 'true');
-    setSession({
-      access_token: 'local-token',
-      user: {
-        id: 'local-desktop-user',
-        email: 'desktop@localhost',
-        app_metadata: { provider: 'local-sqlite' }
-      }
-    } as unknown as AuthSession);
+    signInDemoUser();
   }
 
   useEffect(() => {

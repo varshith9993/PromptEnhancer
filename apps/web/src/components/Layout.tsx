@@ -1,82 +1,34 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { supabase, signOutUser, type AuthSession } from '../lib/supabase';
+import { getStoredAuthSession, signOutUser, supabase, type AuthSession } from '../lib/supabase';
 
 export function Layout() {
   const location = useLocation();
   const [dark, setDark] = useState(true);
-  const [session, setSession] = useState<AuthSession>(null);
+  const [session, setSession] = useState<AuthSession>(() => getStoredAuthSession());
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
   }, [dark]);
 
   useEffect(() => {
-    // Check local demo session
-    const isLocal =
-      localStorage.getItem('promptenhancer_local_mode_v1') === 'true' ||
-      localStorage.getItem('promptpilot_local_mode_v1') === 'true';
-    if (isLocal) {
-      setSession({
-        access_token: 'local-token',
-        user: {
-          id: 'demo-user',
-          email: 'demo@promptenhancer.dev',
-          app_metadata: { provider: 'demo' }
-        }
-      } as unknown as AuthSession);
+    const localSess = getStoredAuthSession();
+    if (localSess) {
+      setSession(localSess);
     }
 
     if (!supabase) return;
 
-    // Handle PKCE code exchange from Google/GitHub OAuth redirect
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    if (code) {
-      supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
-        if (!error && data?.session) {
-          setSession(data.session);
-          const cleanUrl = new URL(window.location.href);
-          cleanUrl.searchParams.delete('code');
-          window.history.replaceState({}, '', cleanUrl.toString());
-        }
-      });
-    }
-
-    const syncKey = urlParams.get('auth_sync');
-
-    function broadcastSession(key: string, sess: NonNullable<AuthSession>) {
-      if (!supabase) return;
-      const ch = supabase.channel(`auth-sync-${key}`);
-      ch.subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          ch.send({
-            type: 'broadcast',
-            event: 'logged_in',
-            payload: {
-              access_token: sess.access_token,
-              refresh_token: sess.refresh_token
-            }
-          });
-          const url = new URL(window.location.href);
-          url.searchParams.delete('auth_sync');
-          window.history.replaceState({}, '', url.toString());
-        }
-      });
-    }
-
     supabase.auth.getSession().then(({ data }) => {
       if (data?.session) {
         setSession(data.session);
-        if (syncKey) broadcastSession(syncKey, data.session);
       }
     });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (nextSession) {
         setSession(nextSession);
-        if (syncKey) broadcastSession(syncKey, nextSession);
-      } else if (!isLocal) {
+      } else if (!getStoredAuthSession()) {
         setSession(null);
       }
     });

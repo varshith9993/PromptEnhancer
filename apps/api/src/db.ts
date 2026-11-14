@@ -65,18 +65,37 @@ function getDbPath(): string {
   }
 }
 
-export function getDatabase(): DatabaseSync {
-  if (dbInstance) return dbInstance;
-  const dbPath = getDbPath();
-  const sqlite = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
-    .process?.getBuiltinModule?.('node:sqlite');
-  if (!sqlite?.DatabaseSync) {
-    throw new Error('SQLite is not available in this runtime environment. Configure Supabase credentials.');
+export function isSqliteAvailable(): boolean {
+  try {
+    const fs = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+      .process?.getBuiltinModule?.('node:fs');
+    const os = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+      .process?.getBuiltinModule?.('node:os');
+    const path = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+      .process?.getBuiltinModule?.('node:path');
+    const sqlite = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+      .process?.getBuiltinModule?.('node:sqlite');
+    return Boolean(fs && os && path && sqlite?.DatabaseSync);
+  } catch {
+    return false;
   }
-  const db = new sqlite.DatabaseSync(dbPath) as DatabaseSync;
-  dbInstance = db;
-  initSchema(db);
-  return db;
+}
+
+export function getDatabase(): DatabaseSync | null {
+  if (dbInstance) return dbInstance;
+  if (!isSqliteAvailable()) return null;
+  try {
+    const dbPath = getDbPath();
+    const sqlite = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+      .process?.getBuiltinModule?.('node:sqlite');
+    if (!sqlite?.DatabaseSync) return null;
+    const db = new sqlite.DatabaseSync(dbPath) as DatabaseSync;
+    dbInstance = db;
+    initSchema(db);
+    return db;
+  } catch {
+    return null;
+  }
 }
 
 function initSchema(db: DatabaseSync): void {
@@ -158,6 +177,7 @@ function initSchema(db: DatabaseSync): void {
 // User management
 export function ensureUser(id: string, email: string, displayName?: string): void {
   const db = getDatabase();
+  if (!db) return;
   db.prepare(`
     INSERT INTO users (id, email, display_name) VALUES (?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET email = excluded.email, display_name = COALESCE(excluded.display_name, users.display_name)
@@ -176,6 +196,7 @@ export function saveEncryptedApiKey(params: {
   lastError?: string | undefined;
 }): void {
   const db = getDatabase();
+  if (!db) return;
   const id = crypto.randomUUID();
   const enc = encryptApiKey(params.apiKey.trim());
   const now = new Date().toISOString();
@@ -219,6 +240,7 @@ export function saveEncryptedApiKey(params: {
 
 export function listUserApiKeys(userId: string): DbApiKey[] {
   const db = getDatabase();
+  if (!db) return [];
   const rows = db.prepare(`
     SELECT id, user_id, provider_id, base_url, model_id, label, status, enabled,
            last_checked_at, last_healthy_at, last_error, updated_at
@@ -258,6 +280,7 @@ export function listUserApiKeys(userId: string): DbApiKey[] {
 
 export function deleteUserApiKey(userId: string, providerId: string): void {
   const db = getDatabase();
+  if (!db) return;
   db.prepare(`
     DELETE FROM user_api_keys WHERE user_id = ? AND provider_id = ?
   `).run(userId, providerId);
@@ -265,6 +288,7 @@ export function deleteUserApiKey(userId: string, providerId: string): void {
 
 export function toggleUserApiKey(userId: string, providerId: string, enabled: boolean): void {
   const db = getDatabase();
+  if (!db) return;
   db.prepare(`
     UPDATE user_api_keys SET enabled = ?, updated_at = datetime('now')
     WHERE user_id = ? AND provider_id = ?
@@ -279,6 +303,7 @@ export function updateKeyHealthStatus(
   modelId?: string
 ): void {
   const db = getDatabase();
+  if (!db) return;
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE user_api_keys SET
@@ -297,6 +322,7 @@ export function getDecryptedApiKey(
   providerId: string
 ): { apiKey: string; baseUrl?: string; modelId?: string } | null {
   const db = getDatabase();
+  if (!db) return null;
   const row = db.prepare(`
     SELECT encrypted_key, iv, auth_tag, base_url, model_id, status, enabled
     FROM user_api_keys
@@ -328,6 +354,7 @@ export function getFirstHealthyApiKey(
   userId: string
 ): { providerId: string; apiKey: string; baseUrl?: string; modelId?: string } | null {
   const db = getDatabase();
+  if (!db) return null;
   const rows = db.prepare(`
     SELECT provider_id, encrypted_key, iv, auth_tag, base_url, model_id
     FROM user_api_keys
@@ -364,10 +391,19 @@ export function saveAccessToken(
   prefix: string,
   name?: string
 ): DbAccessToken {
-  const db = getDatabase();
   const id = crypto.randomUUID();
-  const hash = hashToken(token);
   const now = new Date().toISOString();
+  const db = getDatabase();
+  if (!db) {
+    return {
+      id,
+      userId,
+      tokenPrefix: prefix,
+      name: name || 'Default Key',
+      createdAt: now
+    };
+  }
+  const hash = hashToken(token);
   db.prepare(`
     INSERT INTO user_access_tokens (id, user_id, token_hash, token_prefix, name, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -383,6 +419,7 @@ export function saveAccessToken(
 
 export function listUserAccessTokens(userId: string): DbAccessToken[] {
   const db = getDatabase();
+  if (!db) return [];
   const rows = db.prepare(`
     SELECT id, user_id, token_prefix, name, last_used_at, revoked_at, created_at
     FROM user_access_tokens
@@ -411,6 +448,7 @@ export function listUserAccessTokens(userId: string): DbAccessToken[] {
 
 export function revokeAccessToken(userId: string, tokenId: string): void {
   const db = getDatabase();
+  if (!db) return;
   db.prepare(`
     UPDATE user_access_tokens SET revoked_at = datetime('now')
     WHERE user_id = ? AND id = ?
@@ -419,6 +457,7 @@ export function revokeAccessToken(userId: string, tokenId: string): void {
 
 export function verifyLocalAccessToken(token: string): { userId: string; email: string } | null {
   const db = getDatabase();
+  if (!db) return null;
   const hash = hashToken(token);
   const row = db.prepare(`
     SELECT t.id, t.user_id, u.email
@@ -446,6 +485,7 @@ export function recordPromptHistory(params: {
   providerId?: string | undefined;
 }): void {
   const db = getDatabase();
+  if (!db) return;
   const id = crypto.randomUUID();
   db.prepare(`
     INSERT INTO prompt_history (id, user_id, original_prompt, enhanced_prompt, mode, category, provider_id)
@@ -469,6 +509,7 @@ export function listUserPreferences(userId: string): Array<{
   isDefault: boolean;
 }> {
   const db = getDatabase();
+  if (!db) return [];
   const rows = db.prepare(`
     SELECT id, instruction_text, enabled, is_default
     FROM user_preferences
@@ -493,6 +534,7 @@ export function saveUserPreferences(
   items: Array<{ text: string; enabled: boolean; isDefault?: boolean }>
 ): void {
   const db = getDatabase();
+  if (!db) return;
   db.prepare(`DELETE FROM user_preferences WHERE user_id = ?`).run(userId);
   const stmt = db.prepare(`
     INSERT INTO user_preferences (id, user_id, instruction_text, enabled, is_default, created_at)
@@ -513,6 +555,7 @@ export function listUserProfiles(userId: string): Array<{
   isBuiltin: boolean;
 }> {
   const db = getDatabase();
+  if (!db) return [];
   const rows = db.prepare(`
     SELECT id, name, category, description, system_guidance, is_builtin
     FROM prompt_profiles
@@ -541,6 +584,7 @@ export function saveUserProfile(
   profile: { name: string; category: TaskCategory | string; description: string; systemGuidance: string }
 ): void {
   const db = getDatabase();
+  if (!db) return;
   const id = crypto.randomUUID();
   db.prepare(`
     INSERT INTO prompt_profiles (id, user_id, name, category, description, system_guidance, is_builtin, created_at)

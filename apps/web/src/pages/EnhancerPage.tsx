@@ -18,11 +18,10 @@ import type {
   TaskCategory,
   UserInstruction
 } from '@promptpilot/shared';
-import { supabase, type AuthSession } from '../lib/supabase';
+import { getStoredAuthSession, supabase, type AuthSession } from '../lib/supabase';
 import { getApiUrl } from '../lib/config';
 
 const API_URL = getApiUrl();
-const LOCAL_SESSION_KEY = 'promptpilot_local_mode_v1';
 
 const DEFAULT_PREFERENCES: UserInstruction[] = [
   { id: 'p1', text: 'Preserve existing functionality and routes', enabled: true, isDefault: true },
@@ -102,13 +101,12 @@ export function EnhancerPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (localStorage.getItem(LOCAL_SESSION_KEY) === 'true') {
-      setSession({
-        access_token: 'local-token',
-        user: { id: 'local-desktop-user', email: 'desktop@localhost' }
-      } as unknown as AuthSession);
+    const localSess = getStoredAuthSession();
+    if (localSess) {
+      setSession(localSess);
       setMode('account');
-    } else if (supabase) {
+    }
+    if (supabase) {
       supabase.auth.getSession().then(({ data }) => {
         if (data.session) {
           setSession(data.session);
@@ -119,6 +117,9 @@ export function EnhancerPage() {
         if (next) {
           setSession(next);
           setMode('account');
+        } else if (!getStoredAuthSession()) {
+          setSession(null);
+          setMode('free');
         }
       });
       return () => sub.subscription.unsubscribe();
@@ -245,9 +246,7 @@ export function EnhancerPage() {
 
       let result: EnhanceResponse;
       if (mode === 'account') {
-        const token =
-          session?.access_token ||
-          (localStorage.getItem(LOCAL_SESSION_KEY) === 'true' ? 'local-token' : '');
+        const token = session?.access_token || getStoredAuthSession()?.access_token || '';
         if (!token) {
           throw new Error('Please configure a provider key in the Dashboard first.');
         }

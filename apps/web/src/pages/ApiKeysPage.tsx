@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BYOK_PROVIDERS, type ByokProviderId } from '@promptpilot/prompt-engine';
-import { supabase, type AuthSession } from '../lib/supabase';
+import { getStoredAuthSession, signInDemoUser, supabase, type AuthSession } from '../lib/supabase';
 import { getApiUrl } from '../lib/config';
 
 const API_URL = getApiUrl();
-const LOCAL_SESSION_KEY = 'promptpilot_local_mode_v1';
 
 interface StoredKey {
   providerId: string;
@@ -32,19 +31,7 @@ type TabType = 'providers' | 'unified' | 'agents';
 type FilterStatus = 'all' | 'healthy' | 'issues' | 'disabled';
 
 export function ApiKeysPage() {
-  const [session, setSession] = useState<AuthSession>(() => {
-    if (localStorage.getItem(LOCAL_SESSION_KEY) === 'true') {
-      return {
-        access_token: 'local-token',
-        user: {
-          id: 'local-desktop-user',
-          email: 'desktop@localhost',
-          app_metadata: { provider: 'local-sqlite' }
-        }
-      } as unknown as AuthSession;
-    }
-    return null;
-  });
+  const [session, setSession] = useState<AuthSession>(() => getStoredAuthSession());
   const [loadingSession, setLoadingSession] = useState(true);
 
   // Active view tab & filter
@@ -81,6 +68,11 @@ export function ApiKeysPage() {
 
   // Check auth session on mount
   useEffect(() => {
+    const localSess = getStoredAuthSession();
+    if (localSess) {
+      setSession(localSess);
+      setLoadingSession(false);
+    }
     if (!supabase) {
       setLoadingSession(false);
       return;
@@ -94,21 +86,15 @@ export function ApiKeysPage() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (nextSession) {
         setSession(nextSession);
+      } else if (!getStoredAuthSession()) {
+        setSession(null);
       }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
 
   function enableLocalMode() {
-    localStorage.setItem(LOCAL_SESSION_KEY, 'true');
-    setSession({
-      access_token: 'local-token',
-      user: {
-        id: 'local-desktop-user',
-        email: 'desktop@localhost',
-        app_metadata: { provider: 'local-sqlite' }
-      }
-    } as unknown as AuthSession);
+    signInDemoUser();
   }
 
   // Fetch keys and tokens when authenticated

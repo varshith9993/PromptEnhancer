@@ -17,6 +17,27 @@ export const supabase: SupabaseClient | null =
       })
     : null;
 
+export const LOCAL_AUTH_KEY = 'promptenhancer_auth_v1';
+
+export function getStoredAuthSession(): AuthSession {
+  if (typeof window === 'undefined') return null;
+  const isLocal =
+    localStorage.getItem('promptenhancer_auth_v1') === 'true' ||
+    localStorage.getItem('promptenhancer_local_mode_v1') === 'true' ||
+    localStorage.getItem('promptpilot_local_mode_v1') === 'true';
+  if (isLocal) {
+    return {
+      access_token: 'local-token',
+      user: {
+        id: 'user-promptenhancer',
+        email: 'developer@promptenhancer.dev',
+        app_metadata: { provider: 'developer' }
+      }
+    } as unknown as AuthSession;
+  }
+  return null;
+}
+
 export async function signInWithOAuthProvider(provider: 'google' | 'github'): Promise<void> {
   if (!supabase) {
     throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
@@ -30,51 +51,15 @@ export async function signInWithOAuthProvider(provider: 'google' | 'github'): Pr
   if (error) throw error;
 }
 
-export async function signInWithEmailLink(email: string, syncKey?: string): Promise<void> {
-  if (!supabase) {
-    throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
-  }
-  const trimmed = email.trim();
-  if (!trimmed) {
-    throw new Error('Enter a valid email address.');
-  }
-  const redirectUrl = syncKey
-    ? `${window.location.origin}/enhance?auth_sync=${encodeURIComponent(syncKey)}`
-    : `${window.location.origin}/enhance`;
-
-  const { error } = await supabase.auth.signInWithOtp({
-    email: trimmed,
-    options: {
-      emailRedirectTo: redirectUrl
-    }
-  });
-  if (error) throw error;
-}
-
-export async function verifyEmailOtp(email: string, token: string): Promise<void> {
-  if (!supabase) {
-    throw new Error('Supabase is not configured.');
-  }
-  const trimmedEmail = email.trim();
-  const trimmedToken = token.trim();
-  if (!trimmedEmail || !trimmedToken) {
-    throw new Error('Please enter both your email and the 6-digit code.');
-  }
-  const { error } = await supabase.auth.verifyOtp({
-    email: trimmedEmail,
-    token: trimmedToken,
-    type: 'email'
-  });
-  if (error) throw error;
-}
-
 export function signInDemoUser(): void {
+  localStorage.setItem('promptenhancer_auth_v1', 'true');
   localStorage.setItem('promptenhancer_local_mode_v1', 'true');
   localStorage.setItem('promptpilot_local_mode_v1', 'true');
   window.location.href = '/enhance';
 }
 
 export async function signOutUser(): Promise<void> {
+  localStorage.removeItem('promptenhancer_auth_v1');
   localStorage.removeItem('promptenhancer_local_mode_v1');
   localStorage.removeItem('promptpilot_local_mode_v1');
   if (supabase) {

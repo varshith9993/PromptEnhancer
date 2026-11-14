@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
+  getStoredAuthSession,
   isSupabaseConfigured,
   signInDemoUser,
   signInWithOAuthProvider,
@@ -9,56 +10,43 @@ import {
 } from '../lib/supabase';
 
 export function LoginPage() {
-  const [session, setSession] = useState<AuthSession>(() => {
-    const isLocal =
-      localStorage.getItem('promptenhancer_local_mode_v1') === 'true' ||
-      localStorage.getItem('promptpilot_local_mode_v1') === 'true';
-    if (isLocal) {
-      return {
-        access_token: 'local-token',
-        user: {
-          id: 'demo-user',
-          email: 'demo@promptenhancer.dev',
-          app_metadata: { provider: 'demo' }
-        }
-      } as unknown as AuthSession;
-    }
-    return null;
-  });
+  const [session, setSession] = useState<AuthSession>(() => getStoredAuthSession());
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    // Parse URL errors from OAuth callbacks if any
-    const params = new URLSearchParams(window.location.search);
-    const errDesc = params.get('error_description') || params.get('error');
+    // Parse URL errors from OAuth callbacks (both query string and hash)
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const errDesc =
+      searchParams.get('error_description') ||
+      searchParams.get('error') ||
+      hashParams.get('error_description') ||
+      hashParams.get('error');
+
     if (errDesc) {
       setError(decodeURIComponent(errDesc.replace(/\+/g, ' ')));
     }
 
     if (!supabase) return;
 
-    // Exchange PKCE OAuth code if present
-    const code = params.get('code');
-    if (code) {
+    if (searchParams.has('code') || hashParams.has('access_token')) {
       setBusy('oauth_exchange');
-      supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
-        setBusy(null);
-        if (!error && data?.session) {
-          setSession(data.session);
-          window.location.href = '/enhance';
-        } else if (error) {
-          setError(error.message);
-        }
-      });
-    } else {
-      supabase.auth.getSession().then(({ data }) => {
-        if (data?.session) setSession(data.session);
-      });
     }
 
+    supabase.auth.getSession().then(({ data }) => {
+      if (data?.session) {
+        setSession(data.session);
+        setBusy(null);
+      }
+    });
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      if (next) setSession(next);
+      if (next) {
+        setSession(next);
+        setBusy(null);
+        window.location.href = '/enhance';
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, []);
