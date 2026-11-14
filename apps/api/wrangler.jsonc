@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "promptenhancer-api",
+  "name": "promptenhancer",
+  "account_id": "265f6dc1546f1ae489096c7260c38fc0",
   "main": "src/worker.ts",
   "compatibility_date": "2024-11-01",
   "compatibility_flags": [

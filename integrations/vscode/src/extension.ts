@@ -42,14 +42,14 @@ export function activate(context: vscode.ExtensionContext) {
       { location: vscode.ProgressLocation.Notification, title: 'Enhancing prompt…' },
       () =>
         new Promise<void>((resolve) => {
-          execFile('promptpilot', args, { timeout: 30_000 }, (err, stdout, stderr) => {
+          execFile('promptpilot', args, { timeout: 30_000 }, (err: Error | null, stdout: string, stderr: string) => {
             if (err) {
               // Fall back to npx if the binary isn't installed globally
               execFile(
                 'npx',
                 ['--yes', '@promptpilot/cli', ...args],
                 { timeout: 60_000 },
-                (err2, stdout2) => {
+                (err2: Error | null, stdout2: string) => {
                   if (err2) {
                     vscode.window.showErrorMessage(
                       `PromptPilot failed: ${stderr || err2.message}`
