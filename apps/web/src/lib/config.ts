@@ -22,7 +22,6 @@ export function getSupabaseConfig(): { url: string; key: string } {
   const url = (env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL).trim();
   const key = (
     env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    env.VITE_SUPABASE_PUBLISHABLI ||
     env.VITE_SUPABASE_ANON_KEY ||
     DEFAULT_SUPABASE_PUBLISHABLE_KEY
   ).trim();

@@ -13,10 +13,43 @@ export function Layout() {
 
   useEffect(() => {
     if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const urlParams = new URLSearchParams(window.location.search);
+    const syncKey = urlParams.get('auth_sync');
+
+    function broadcastSession(key: string, sess: NonNullable<AuthSession>) {
+      if (!supabase) return;
+      const ch = supabase.channel(`auth-sync-${key}`);
+      ch.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          ch.send({
+            type: 'broadcast',
+            event: 'logged_in',
+            payload: {
+              access_token: sess.access_token,
+              refresh_token: sess.refresh_token
+            }
+          });
+          const url = new URL(window.location.href);
+          url.searchParams.delete('auth_sync');
+          window.history.replaceState({}, '', url.toString());
+        }
+      });
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      if (syncKey && data.session) {
+        broadcastSession(syncKey, data.session);
+      }
+    });
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      if (syncKey && nextSession) {
+        broadcastSession(syncKey, nextSession);
+      }
     });
+
     return () => sub.subscription.unsubscribe();
   }, []);
 

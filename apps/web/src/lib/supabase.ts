@@ -21,7 +21,7 @@ export async function signInWithOAuthProvider(provider: 'google' | 'github'): Pr
   if (error) throw error;
 }
 
-export async function signInWithEmailLink(email: string): Promise<void> {
+export async function signInWithEmailLink(email: string, syncKey?: string): Promise<void> {
   if (!supabase) {
     throw new Error('Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.');
   }
@@ -29,11 +29,32 @@ export async function signInWithEmailLink(email: string): Promise<void> {
   if (!trimmed) {
     throw new Error('Enter a valid email address.');
   }
+  const redirectUrl = syncKey
+    ? `${window.location.origin}/enhance?auth_sync=${encodeURIComponent(syncKey)}`
+    : `${window.location.origin}/enhance`;
+
   const { error } = await supabase.auth.signInWithOtp({
     email: trimmed,
     options: {
-      emailRedirectTo: `${window.location.origin}/enhance`
+      emailRedirectTo: redirectUrl
     }
+  });
+  if (error) throw error;
+}
+
+export async function verifyEmailOtp(email: string, token: string): Promise<void> {
+  if (!supabase) {
+    throw new Error('Supabase is not configured.');
+  }
+  const trimmedEmail = email.trim();
+  const trimmedToken = token.trim();
+  if (!trimmedEmail || !trimmedToken) {
+    throw new Error('Please enter both your email and the 6-digit code.');
+  }
+  const { error } = await supabase.auth.verifyOtp({
+    email: trimmedEmail,
+    token: trimmedToken,
+    type: 'email'
   });
   if (error) throw error;
 }
