@@ -1,7 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import type { TaskCategory } from '@promptpilot/shared';
 import { decryptApiKey, encryptApiKey, hashToken } from './crypto.js';
@@ -34,6 +31,17 @@ export interface DbAccessToken {
 let dbInstance: DatabaseSync | null = null;
 
 function getDbPath(): string {
+  const fs = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+    .process?.getBuiltinModule?.('node:fs');
+  const os = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+    .process?.getBuiltinModule?.('node:os');
+  const path = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+    .process?.getBuiltinModule?.('node:path');
+
+  if (!fs || !os || !path) {
+    throw new Error('Local filesystem is not available in this environment. Configure Supabase credentials.');
+  }
+
   if (process.env.PROMPTPILOT_DB_PATH) {
     const custom = process.env.PROMPTPILOT_DB_PATH;
     const customDir = path.dirname(custom);
@@ -60,7 +68,12 @@ function getDbPath(): string {
 export function getDatabase(): DatabaseSync {
   if (dbInstance) return dbInstance;
   const dbPath = getDbPath();
-  const db = new DatabaseSync(dbPath);
+  const sqlite = (globalThis as unknown as { process?: { getBuiltinModule?: (m: string) => any } })
+    .process?.getBuiltinModule?.('node:sqlite');
+  if (!sqlite?.DatabaseSync) {
+    throw new Error('SQLite is not available in this runtime environment. Configure Supabase credentials.');
+  }
+  const db = new sqlite.DatabaseSync(dbPath) as DatabaseSync;
   dbInstance = db;
   initSchema(db);
   return db;
