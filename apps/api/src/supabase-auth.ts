@@ -7,10 +7,14 @@ import {
   getFirstHealthyApiKey,
   listUserAccessTokens,
   listUserApiKeys,
+  listUserPreferences,
+  listUserProfiles,
   recordPromptHistory,
   revokeAccessToken,
   saveAccessToken,
   saveEncryptedApiKey,
+  saveUserPreferences,
+  saveUserProfile,
   toggleUserApiKey as dbToggleApiKey,
   updateKeyHealthStatus,
   verifyLocalAccessToken
@@ -95,7 +99,9 @@ export async function fetchUserPreferences(
   userId: string
 ): Promise<UserInstruction[]> {
   const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
+  if (!env) {
+    return listUserPreferences(userId);
+  }
   const res = await fetch(
     `${env.url}/rest/v1/user_preferences?user_id=eq.${encodeURIComponent(userId)}&select=id,instruction_text,enabled,is_default&order=created_at.asc`,
     {
@@ -124,7 +130,10 @@ export async function replaceUserPreferences(
   items: UserInstruction[]
 ): Promise<void> {
   const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
+  if (!env) {
+    saveUserPreferences(user.id, items);
+    return;
+  }
   await ensureUserRow(accessToken, user);
 
   await fetch(`${env.url}/rest/v1/user_preferences?user_id=eq.${encodeURIComponent(user.id)}`, {
@@ -159,7 +168,9 @@ export async function fetchUserProfiles(
   userId: string
 ): Promise<PromptProfile[]> {
   const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
+  if (!env) {
+    return listUserProfiles(userId);
+  }
   const res = await fetch(
     `${env.url}/rest/v1/prompt_profiles?user_id=eq.${encodeURIComponent(userId)}&select=id,name,category,description,system_guidance,is_builtin&order=created_at.asc`,
     {
@@ -192,7 +203,10 @@ export async function insertUserProfile(
   profile: Omit<PromptProfile, 'id' | 'isBuiltin'>
 ): Promise<void> {
   const env = getSupabaseEnv();
-  if (!env) throw new Error('Supabase is not configured on API.');
+  if (!env) {
+    saveUserProfile(user.id, profile);
+    return;
+  }
   await ensureUserRow(accessToken, user);
 
   const res = await fetch(`${env.url}/rest/v1/prompt_profiles`, {

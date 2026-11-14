@@ -125,6 +125,17 @@ function initSchema(db: DatabaseSync): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS prompt_profiles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      system_guidance TEXT NOT NULL,
+      is_builtin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     INSERT OR IGNORE INTO users (id, email, display_name)
     VALUES ('local-desktop-user', 'desktop@localhost', 'Local Developer');
   `);
@@ -434,4 +445,91 @@ export function recordPromptHistory(params: {
     params.category,
     params.providerId || null
   );
+}
+
+// User Preferences (Local SQLite fallback when Supabase is not configured)
+export function listUserPreferences(userId: string): Array<{
+  id: string;
+  text: string;
+  enabled: boolean;
+  isDefault: boolean;
+}> {
+  const db = getDatabase();
+  const rows = db.prepare(`
+    SELECT id, instruction_text, enabled, is_default
+    FROM user_preferences
+    WHERE user_id = ?
+    ORDER BY created_at ASC
+  `).all(userId) as Array<{
+    id: string;
+    instruction_text: string;
+    enabled: number;
+    is_default: number;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    text: r.instruction_text,
+    enabled: r.enabled === 1,
+    isDefault: r.is_default === 1
+  }));
+}
+
+export function saveUserPreferences(
+  userId: string,
+  items: Array<{ text: string; enabled: boolean; isDefault?: boolean }>
+): void {
+  const db = getDatabase();
+  db.prepare(`DELETE FROM user_preferences WHERE user_id = ?`).run(userId);
+  const stmt = db.prepare(`
+    INSERT INTO user_preferences (id, user_id, instruction_text, enabled, is_default, created_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now'))
+  `);
+  for (const item of items) {
+    stmt.run(crypto.randomUUID(), userId, item.text, item.enabled ? 1 : 0, item.isDefault ? 1 : 0);
+  }
+}
+
+// User Profiles (Local SQLite fallback when Supabase is not configured)
+export function listUserProfiles(userId: string): Array<{
+  id: string;
+  name: string;
+  category: 'feature' | 'bug_fix' | 'refactor' | 'ui_ux' | 'security' | 'testing' | 'docs' | 'debugging' | 'performance';
+  description: string;
+  systemGuidance: string;
+  isBuiltin: boolean;
+}> {
+  const db = getDatabase();
+  const rows = db.prepare(`
+    SELECT id, name, category, description, system_guidance, is_builtin
+    FROM prompt_profiles
+    WHERE user_id = ?
+    ORDER BY created_at ASC
+  `).all(userId) as Array<{
+    id: string;
+    name: string;
+    category: string;
+    description: string;
+    system_guidance: string;
+    is_builtin: number;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    category: r.category as 'feature',
+    description: r.description,
+    systemGuidance: r.system_guidance,
+    isBuiltin: r.is_builtin === 1
+  }));
+}
+
+export function saveUserProfile(
+  userId: string,
+  profile: { name: string; category: string; description: string; systemGuidance: string }
+): void {
+  const db = getDatabase();
+  const id = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO prompt_profiles (id, user_id, name, category, description, system_guidance, is_builtin, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, datetime('now'))
+  `).run(id, userId, profile.name, profile.category, profile.description, profile.systemGuidance);
 }

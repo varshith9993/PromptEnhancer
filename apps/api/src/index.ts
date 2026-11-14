@@ -48,10 +48,18 @@ function isRateLimited(ip: string): boolean {
   return bucket.count > RATE_MAX_REQUESTS;
 }
 
-function setCors(res: http.ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', WEB_ORIGIN);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+function setCors(res: http.ServerResponse, req?: http.IncomingMessage): void {
+  const incomingReq = req ?? (res as unknown as { __req?: http.IncomingMessage }).__req;
+  const origin = incomingReq?.headers?.origin;
+  if (origin && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === WEB_ORIGIN)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', WEB_ORIGIN);
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
 function setSecurityHeaders(res: http.ServerResponse): void {
@@ -92,10 +100,11 @@ export async function handleRequest(
   const method = req.method ?? 'GET';
   const url = req.url ?? '/';
 
+  (res as unknown as { __req?: http.IncomingMessage }).__req = req;
   setSecurityHeaders(res);
 
   if (method === 'OPTIONS') {
-    setCors(res);
+    setCors(res, req);
     res.writeHead(204);
     res.end();
     return;
