@@ -150,8 +150,8 @@ test('CORS handles dynamic localhost/127.0.0.1 ports and methods PATCH/DELETE', 
   });
   assert.equal(optionsRes.status, 204);
   assert.equal(optionsRes.headers['access-control-allow-origin'], 'http://localhost:5174');
-  assert.match(optionsRes.headers['access-control-allow-methods'], /PATCH/);
-  assert.match(optionsRes.headers['access-control-allow-methods'], /DELETE/);
+  assert.match(String(optionsRes.headers['access-control-allow-methods']), /PATCH/);
+  assert.match(String(optionsRes.headers['access-control-allow-methods']), /DELETE/);
 
   const ipOriginRes = await invoke('OPTIONS', '/api/enhance', undefined, {
     origin: 'http://127.0.0.1:3000'

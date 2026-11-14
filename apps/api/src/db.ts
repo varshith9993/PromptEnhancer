@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import type { TaskCategory } from '@promptpilot/shared';
 import { decryptApiKey, encryptApiKey, hashToken } from './crypto.js';
 
 export interface DbApiKey {
@@ -493,7 +494,7 @@ export function saveUserPreferences(
 export function listUserProfiles(userId: string): Array<{
   id: string;
   name: string;
-  category: 'feature' | 'bug_fix' | 'refactor' | 'ui_ux' | 'security' | 'testing' | 'docs' | 'debugging' | 'performance';
+  category: TaskCategory;
   description: string;
   systemGuidance: string;
   isBuiltin: boolean;
@@ -515,7 +516,7 @@ export function listUserProfiles(userId: string): Array<{
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
-    category: r.category as 'feature',
+    category: r.category as TaskCategory,
     description: r.description,
     systemGuidance: r.system_guidance,
     isBuiltin: r.is_builtin === 1
@@ -524,7 +525,7 @@ export function listUserProfiles(userId: string): Array<{
 
 export function saveUserProfile(
   userId: string,
-  profile: { name: string; category: string; description: string; systemGuidance: string }
+  profile: { name: string; category: TaskCategory | string; description: string; systemGuidance: string }
 ): void {
   const db = getDatabase();
   const id = crypto.randomUUID();
