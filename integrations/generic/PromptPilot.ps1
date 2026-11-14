@@ -5,23 +5,42 @@ $script:PromptPilotRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 function enhance {
   param(
-    [Parameter(Mandatory = $true, Position = 0)]
-    [string]$Prompt,
-    [string]$Mode = "free",
-    [string]$Provider = "aihorde",
-    [string]$UserSelectedProfile = ""
+    [Parameter(Mandatory = $true, Position = 0, ValueFromRemainingArguments = $true)]
+    [string[]]$PromptArgs,
+    [string]$Mode = "",
+    [string]$Provider = "",
+    [string]$UserSelectedProfile = "",
+    [string]$Agent = "generic"
   )
 
+  $promptText = $PromptArgs -join " "
   $cli = Join-Path $script:PromptPilotRoot "apps\cli\dist\index.js"
-  $argsList = @($cli, "enhance", $Prompt, "--mode", $Mode, "--provider", $Provider)
-  if ($UserSelectedProfile) { $argsList += @("--profile", $UserSelectedProfile) }
 
-  $output = & node @argsList
+  $argsList = @()
+  if (Test-Path $cli) {
+    $cmd = "node"
+    $argsList += @($cli, "enhance", $promptText)
+  } else {
+    $cmd = "npx"
+    $argsList += @("--yes", "@promptpilot/cli", "enhance", $promptText)
+  }
+
+  if ($Mode) { $argsList += @("--mode", $Mode) }
+  if ($Provider) { $argsList += @("--provider", $Provider) }
+  if ($UserSelectedProfile) { $argsList += @("--profile", $UserSelectedProfile) }
+  if ($Agent) { $argsList += @("--agent", $Agent) }
+
+  $output = & $cmd @argsList
   if ($LASTEXITCODE -eq 0) {
     $text = $output -join "`n"
-    $text | Set-Clipboard
+    try { $text | Set-Clipboard } catch { }
     Write-Output $text
     Write-Host "`n[PromptPilot] Copied enhanced prompt to clipboard." -ForegroundColor Green
   }
 }
+
+function /enhance {
+  enhance @args
+}
+
 

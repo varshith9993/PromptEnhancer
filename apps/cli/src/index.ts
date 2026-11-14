@@ -196,7 +196,7 @@ async function run(): Promise<number> {
     return handleKey(positionals.slice(1), values.key);
   }
 
-  if (command === 'enhance') {
+  if (command === 'enhance' || command === '/enhance') {
     const cfg = await loadCliConfig();
     const promptText = values.file
       ? (await readFile(values.file, 'utf8')).trim()
@@ -210,7 +210,7 @@ async function run(): Promise<number> {
     const activeMode = (values.mode || cfg.mode) as 'free' | 'byok';
     const activeAgent = (values.agent || cfg.agent || 'generic') as TargetAgent;
     const activeProfile = values.profile || cfg.profile;
-    const activeProvider = (values.provider || cfg.provider || 'aihorde') as ByokProviderId;
+    const activeProvider = (values.provider || cfg.provider || 'freellmapi') as ByokProviderId;
     const activeModel = values.model || cfg.model;
 
     const baseRequest = {
@@ -265,8 +265,10 @@ async function run(): Promise<number> {
     if (activeMode === 'byok') {
       const meta = BYOK_PROVIDERS.find((p) => p.id === activeProvider);
       if (!meta) {
-        console.error(`Unknown provider "${activeProvider}".`);
-        return 1;
+        console.error(`Unknown provider "${activeProvider}". Falling back to PromptPilot rule-based engine.`);
+        const result = enhancePromptRuleBased({ ...baseRequest, mode: 'free' });
+        console.log(result.enhancedPrompt);
+        return 0;
       }
       const apiKey =
         values.key.trim() ||
@@ -276,26 +278,39 @@ async function run(): Promise<number> {
 
       if (meta.requiresKey && !apiKey) {
         console.error(
-          `Error: no API key found for ${activeProvider}. Run "promptpilot key set ${activeProvider}" or set PROMPTPILOT_API_KEY.`
+          `Notice: No API key found for ${activeProvider}. Falling back to PromptPilot rule-based engine.`
         );
-        return 1;
+        const result = enhancePromptRuleBased({ ...baseRequest, mode: 'free' });
+        console.log(result.enhancedPrompt);
+        return 0;
       }
 
-      const result = await enhancePromptWithByok(
-        { ...baseRequest, mode: 'byok' },
-        {
-          providerId: activeProvider,
-          apiKey,
-          ...(activeModel ? { modelId: activeModel } : {}),
-          ...(values['base-url'] ? { baseUrl: values['base-url'] } : {})
-        }
-      );
-      console.log(result.enhancedPrompt);
-      return 0;
+      try {
+        const result = await enhancePromptWithByok(
+          { ...baseRequest, mode: 'byok' },
+          {
+            providerId: activeProvider,
+            apiKey,
+            ...(activeModel ? { modelId: activeModel } : {}),
+            ...(values['base-url'] ? { baseUrl: values['base-url'] } : {})
+          }
+        );
+        console.log(result.enhancedPrompt);
+        return 0;
+      } catch (err) {
+        console.error(
+          `Notice: AI enhancement with ${activeProvider} failed (${err instanceof Error ? err.message : 'error'}), falling back to PromptPilot engine.`
+        );
+        const result = enhancePromptRuleBased({ ...baseRequest, mode: 'free' });
+        console.log(result.enhancedPrompt);
+        return 0;
+      }
     }
 
-    console.error(`Unsupported mode "${activeMode}". Use free or byok.`);
-    return 1;
+    console.error(`Unsupported mode "${activeMode}". Falling back to PromptPilot rule-based engine.`);
+    const result = enhancePromptRuleBased({ ...baseRequest, mode: 'free' });
+    console.log(result.enhancedPrompt);
+    return 0;
   }
 
   console.error(`Unknown command: ${command}\n`);

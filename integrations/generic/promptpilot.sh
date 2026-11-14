@@ -5,11 +5,15 @@
 PROMPTPILOT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 
 enhance() {
-  local prompt="$1"
-  local mode="${2:-free}"
-  local provider="${3:-aihorde}"
+  local prompt="$*"
+  local cli="$PROMPTPILOT_ROOT/apps/cli/dist/index.js"
   local output
-  output="$(node "$PROMPTPILOT_ROOT/apps/cli/dist/index.js" enhance "$prompt" --mode "$mode" --provider "$provider")" || return 1
+
+  if [[ -f "$cli" ]]; then
+    output="$(node "$cli" enhance "$prompt")" || return 1
+  else
+    output="$(npx --yes @promptpilot/cli enhance "$prompt")" || return 1
+  fi
 
   printf '%s\n' "$output"
   if command -v pbcopy >/dev/null 2>&1; then
@@ -20,4 +24,6 @@ enhance() {
     printf '\n[PromptPilot] Copied to clipboard.\n'
   fi
 }
+
+alias /enhance='enhance'
 

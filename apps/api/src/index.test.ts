@@ -12,6 +12,7 @@ async function invoke(
   headers?: Record<string, string>
 ): Promise<{
   status: number;
+  headers: Record<string, string>;
   json: Record<string, unknown>;
 }> {
   const payload = body === undefined ? '' : JSON.stringify(body);
@@ -22,9 +23,12 @@ async function invoke(
   (req as unknown as { socket: { remoteAddress: string } }).socket = { remoteAddress: '127.0.0.1' };
 
   let status = 200;
+  const outHeaders: Record<string, string> = {};
   let raw = '';
   const res = {
-    setHeader() {},
+    setHeader(key: string, val: string) {
+      outHeaders[key.toLowerCase()] = val;
+    },
     writeHead(code: number) {
       status = code;
     },
@@ -34,7 +38,7 @@ async function invoke(
   } as unknown as http.ServerResponse;
 
   await handleRequest(req, res);
-  return { status, json: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
+  return { status, headers: outHeaders, json: raw ? (JSON.parse(raw) as Record<string, unknown>) : {} };
 }
 
 test('API core routes: /health, /api/plans, /api/enhance, and 401 on protected route', async () => {
@@ -117,8 +121,18 @@ test('User API keys and personal access tokens lifecycle: create, list, authenti
     authorization: `Bearer ${pat}`
   });
   assert.equal(listKeys.status, 200);
-  const keys = listKeys.json.keys as Array<{ providerId: string; status: string }>;
-  assert.ok(keys.some((k) => k.providerId === 'openrouter' && k.status === 'healthy'));
+  const keys = listKeys.json.keys as Array<{ providerId: string; status: string; enabled: boolean }>;
+  assert.ok(keys.some((k) => k.providerId === 'openrouter' && k.status === 'healthy' && k.enabled === true));
+
+  // Toggle key enabled -> false
+  const patchRes = await invoke(
+    'PATCH',
+    '/api/me/keys',
+    { providerId: 'openrouter', enabled: false },
+    { authorization: `Bearer ${pat}` }
+  );
+  assert.equal(patchRes.status, 200);
+  assert.equal(patchRes.json.ok, true);
 
   const deleteKey = await invoke(
     'DELETE',
@@ -128,4 +142,61 @@ test('User API keys and personal access tokens lifecycle: create, list, authenti
   );
   assert.equal(deleteKey.status, 200);
   assert.equal(deleteKey.json.ok, true);
+});
+
+test('CORS handles dynamic localhost/127.0.0.1 ports and methods PATCH/DELETE', async () => {
+  const optionsRes = await invoke('OPTIONS', '/api/me/keys', undefined, {
+    origin: 'http://localhost:5174'
+  });
+  assert.equal(optionsRes.status, 204);
+  assert.equal(optionsRes.headers['access-control-allow-origin'], 'http://localhost:5174');
+  assert.match(optionsRes.headers['access-control-allow-methods'], /PATCH/);
+  assert.match(optionsRes.headers['access-control-allow-methods'], /DELETE/);
+
+  const ipOriginRes = await invoke('OPTIONS', '/api/enhance', undefined, {
+    origin: 'http://127.0.0.1:3000'
+  });
+  assert.equal(ipOriginRes.status, 204);
+  assert.equal(ipOriginRes.headers['access-control-allow-origin'], 'http://127.0.0.1:3000');
+});
+
+test('Offline SQLite fallback for user preferences and user profiles', async () => {
+  // Put preferences
+  const savePrefs = await invoke(
+    'PUT',
+    '/api/me/preferences',
+    { items: [{ id: 'pref-1', text: 'Prefer TypeScript strict mode', enabled: true, isDefault: true }] },
+    { authorization: 'Bearer local-token' }
+  );
+  assert.equal(savePrefs.status, 200);
+
+  // Get preferences
+  const getPrefs = await invoke('GET', '/api/me/preferences', undefined, {
+    authorization: 'Bearer local-token'
+  });
+  assert.equal(getPrefs.status, 200);
+  const items = getPrefs.json.items as Array<{ text: string; enabled: boolean }>;
+  assert.ok(items.some((i) => i.text === 'Prefer TypeScript strict mode'));
+
+  // Post profile
+  const saveProf = await invoke(
+    'POST',
+    '/api/me/profiles',
+    {
+      name: 'Custom Team Profile',
+      category: 'feature',
+      description: 'Profile for internal team',
+      systemGuidance: 'Follow project style guide rigorously.'
+    },
+    { authorization: 'Bearer local-token' }
+  );
+  assert.equal(saveProf.status, 201);
+
+  // Get profiles
+  const getProf = await invoke('GET', '/api/me/profiles', undefined, {
+    authorization: 'Bearer local-token'
+  });
+  assert.equal(getProf.status, 200);
+  const profiles = getProf.json.profiles as Array<{ name: string; systemGuidance: string }>;
+  assert.ok(profiles.some((p) => p.name === 'Custom Team Profile'));
 });
