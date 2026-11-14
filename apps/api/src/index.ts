@@ -51,7 +51,12 @@ function isRateLimited(ip: string): boolean {
 function setCors(res: http.ServerResponse, req?: http.IncomingMessage): void {
   const incomingReq = req ?? (res as unknown as { __req?: http.IncomingMessage }).__req;
   const origin = incomingReq?.headers?.origin;
-  if (origin && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === WEB_ORIGIN)) {
+  if (
+    origin &&
+    (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+      origin.endsWith('.pages.dev') ||
+      origin === WEB_ORIGIN)
+  ) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   } else {

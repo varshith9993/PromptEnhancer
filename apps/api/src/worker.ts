@@ -40,7 +40,12 @@ function getCorsHeaders(request: Request, env?: Env): HeadersInit {
   const origin = request.headers.get('origin');
   const allowedOrigin = env?.WEB_ORIGIN ?? process.env.WEB_ORIGIN ?? '*';
   let allowOrigin = allowedOrigin;
-  if (origin && (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || origin === allowedOrigin)) {
+  if (
+    origin &&
+    (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+      origin.endsWith('.pages.dev') ||
+      origin === allowedOrigin)
+  ) {
     allowOrigin = origin;
   }
   return {
