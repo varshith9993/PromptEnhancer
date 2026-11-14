@@ -35,7 +35,7 @@ export function HomePage() {
             Turn rough ideas into powerful coding prompts.
           </h1>
           <p className="text-base text-zinc-600 dark:text-zinc-400 leading-relaxed">
-            PromptPilot turns vague developer instructions into structured, actionable prompts for AI
+            PromptEnhancer turns vague developer instructions into structured, actionable prompts for AI
             coding agents. Run the free rule-based engine with no API key, or paste your own key
             in BYOK mode.
           </p>

@@ -44,8 +44,8 @@ export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedU
   const token = authHeader.slice(7).trim();
   if (!token) return null;
 
-  // 1. Personal Access Token (pp_live_...) verified against database
-  if (token.startsWith('pp_live_')) {
+  // 1. Personal Access Token (pe_live_... / pp_live_...) verified against database
+  if (token.startsWith('pe_live_') || token.startsWith('pp_live_')) {
     const local = verifyLocalAccessToken(token);
     if (local) {
       return { id: local.userId, email: local.email, tokenType: 'api_key' };

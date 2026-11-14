@@ -1,20 +1,14 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import {
   isSupabaseConfigured,
-  signInWithEmailLink,
   signInWithOAuthProvider,
   signOutUser,
-  verifyEmailOtp,
   supabase,
   type AuthSession
 } from '../lib/supabase';
 
 export function LoginPage() {
   const [session, setSession] = useState<AuthSession>(null);
-  const [email, setEmail] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [emailSent, setEmailSent] = useState(false);
-  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -27,7 +21,6 @@ export function LoginPage() {
 
   async function handleOAuth(provider: 'google' | 'github') {
     setError('');
-    setNotice('');
     setBusy(provider);
     try {
       await signInWithOAuthProvider(provider);
@@ -37,68 +30,22 @@ export function LoginPage() {
     }
   }
 
-  async function handleEmailSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    setNotice('');
-    setBusy('email');
-    try {
-      const syncKey = Math.random().toString(36).slice(2) + Date.now().toString(36);
-      await signInWithEmailLink(email, syncKey);
-      setEmailSent(true);
-      setNotice('Verification email sent! If you click the link on your mobile, this screen will log in automatically.');
-
-      // Listen for cross-device authentication broadcast from phone
-      if (supabase) {
-        const client = supabase;
-        const channel = client.channel(`auth-sync-${syncKey}`);
-        channel.on('broadcast', { event: 'logged_in' }, async ({ payload }) => {
-          if (payload?.access_token && payload?.refresh_token) {
-            await client.auth.setSession({
-              access_token: payload.access_token,
-              refresh_token: payload.refresh_token
-            });
-            channel.unsubscribe();
-          }
-        });
-        channel.subscribe();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send verification email.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleOtpSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError('');
-    setNotice('');
-    setBusy('otp');
-    try {
-      await verifyEmailOtp(email, otpCode);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid code. Please check your email and try again.');
-    } finally {
-      setBusy(null);
-    }
-  }
-
   return (
     <div className="mx-auto max-w-md px-4 py-16">
-      <div className="p-6 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-5">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold">Sign in to PromptPilot</h1>
+      <div className="p-6 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-6">
+        <div className="space-y-1.5 text-center">
+          <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-indigo-600/10 text-indigo-500 mb-2">
+            <span className="w-4 h-4 rounded-sm bg-indigo-600" />
+          </div>
+          <h1 className="text-xl font-semibold">Sign in to PromptEnhancer</h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Sign in with Google, GitHub, or an email verification link. Free and BYOK modes also
-            work without signing in.
+            Sign in with Google or GitHub to manage your keys, sync preferences, and access your personal PromptEnhancer API key.
           </p>
         </div>
 
         {!isSupabaseConfigured && (
           <div className="p-3 rounded border border-amber-500/40 bg-amber-500/10 text-xs text-amber-400">
-            Missing <code>VITE_SUPABASE_URL</code> or <code>VITE_SUPABASE_PUBLISHABLE_KEY</code> in{' '}
-            <code>apps/web/.env</code>. See <code>docs/setup-guide.md</code>.
+            Missing Supabase configuration. See docs/setup-guide.md.
           </div>
         )}
 
@@ -108,121 +55,48 @@ export function LoginPage() {
           </div>
         )}
 
-        {notice && (
-          <div className="p-3 rounded border border-emerald-500/40 bg-emerald-500/10 text-xs text-emerald-400">
-            {notice}
-          </div>
-        )}
-
         {session ? (
           <div className="space-y-4">
-            <div className="p-3 rounded bg-zinc-100 dark:bg-zinc-800 text-xs space-y-1">
-              <p className="font-medium">Signed in</p>
-              <p className="text-zinc-600 dark:text-zinc-300">{session.user.email}</p>
+            <div className="p-3.5 rounded-md bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 text-xs space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <p className="font-medium text-zinc-900 dark:text-zinc-100">Signed In</p>
+              </div>
+              <p className="text-zinc-600 dark:text-zinc-400 pl-4">{session.user.email}</p>
             </div>
             <button
               type="button"
               onClick={() => void signOutUser()}
-              className="w-full px-4 py-2 rounded border border-zinc-300 dark:border-zinc-700 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-700 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
             >
               Sign out
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
-            {!emailSent ? (
-              <>
-                <div className="space-y-2.5">
-                  <button
-                    type="button"
-                    disabled={!isSupabaseConfigured || busy !== null}
-                    onClick={() => void handleOAuth('google')}
-                    className="w-full px-4 py-2.5 rounded bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
-                  >
-                    {busy === 'google' ? 'Redirecting to Google...' : 'Continue with Google'}
-                  </button>
+          <div className="space-y-3">
+            <button
+              type="button"
+              disabled={!isSupabaseConfigured || busy !== null}
+              onClick={() => void handleOAuth('google')}
+              className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50 transition shadow-sm"
+            >
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                <path d="M12.24 10.285V13.4h6.887C18.2 16.14 15.645 18 12.24 18c-3.315 0-6-2.685-6-6s2.685-6 6-6c1.47 0 2.805.54 3.84 1.425l2.4-2.4C16.89 3.51 14.7 2.6 12.24 2.6 7.05 2.6 2.84 6.81 2.84 12s4.21 9.4 9.4 9.4c5.43 0 9.045-3.825 9.045-9.225 0-.675-.075-1.32-.195-1.89H12.24z" />
+              </svg>
+              {busy === 'google' ? 'Redirecting to Google...' : 'Continue with Google'}
+            </button>
 
-                  <button
-                    type="button"
-                    disabled={!isSupabaseConfigured || busy !== null}
-                    onClick={() => void handleOAuth('github')}
-                    className="w-full px-4 py-2.5 rounded border border-zinc-300 dark:border-zinc-700 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
-                  >
-                    {busy === 'github' ? 'Redirecting to GitHub...' : 'Continue with GitHub'}
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-                  <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-                  <span>OR</span>
-                  <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
-                </div>
-
-                <form onSubmit={(e) => void handleEmailSubmit(e)} className="space-y-2.5">
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    className="w-full px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-sm"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!isSupabaseConfigured || busy !== null || !email.trim()}
-                    className="w-full px-4 py-2 rounded border border-zinc-300 dark:border-zinc-700 text-sm font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
-                  >
-                    {busy === 'email' ? 'Sending link...' : 'Send Email Verification Link'}
-                  </button>
-                </form>
-              </>
-            ) : (
-              <div className="space-y-4">
-                <div className="p-3 rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60 text-xs space-y-2">
-                  <div className="flex items-center gap-2 text-indigo-400">
-                    <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-                    <span className="font-medium">Waiting for verification...</span>
-                  </div>
-                  <p className="text-zinc-500 dark:text-zinc-400">
-                    Click the <strong>Sign In</strong> link on your mobile, or enter the 6-digit code from the email below:
-                  </p>
-                </div>
-
-                <form onSubmit={(e) => void handleOtpSubmit(e)} className="space-y-2.5">
-                  <input
-                    type="text"
-                    required
-                    maxLength={10}
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value)}
-                    placeholder="Enter 6-digit code"
-                    className="w-full px-3 py-2 rounded border border-zinc-300 dark:border-zinc-700 bg-transparent text-sm font-mono tracking-widest text-center text-lg"
-                  />
-                  <button
-                    type="submit"
-                    disabled={busy !== null || !otpCode.trim()}
-                    className="w-full px-4 py-2 rounded bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
-                  >
-                    {busy === 'otp' ? 'Verifying code...' : 'Verify Code & Sign In'}
-                  </button>
-                </form>
-
-                <div className="text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmailSent(false);
-                      setOtpCode('');
-                      setNotice('');
-                      setError('');
-                    }}
-                    className="text-xs text-zinc-500 hover:text-zinc-300 underline"
-                  >
-                    Use a different email or resend
-                  </button>
-                </div>
-              </div>
-            )}
+            <button
+              type="button"
+              disabled={!isSupabaseConfigured || busy !== null}
+              onClick={() => void handleOAuth('github')}
+              className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700/60 disabled:opacity-50 transition"
+            >
+              <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+              </svg>
+              {busy === 'github' ? 'Redirecting to GitHub...' : 'Continue with GitHub'}
+            </button>
           </div>
         )}
       </div>

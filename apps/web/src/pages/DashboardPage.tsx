@@ -316,7 +316,7 @@ export function DashboardPage() {
         <div>
           <h2 className="text-sm font-semibold">Your AI Provider Keys (Account Stored)</h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Store your provider keys (FreeLLMAPI unified key, Gemini, Groq, OpenRouter) securely in your database account. When you call PromptPilot via API or CLI, your stored provider is used automatically.
+            Store your provider keys (FreeLLMAPI unified key, Gemini, Groq, OpenRouter) securely in your database account. When you call PromptEnhancer via API or CLI, your stored provider is used automatically.
           </p>
         </div>
 
@@ -483,7 +483,7 @@ export function DashboardPage() {
       {/* PromptPilot Personal API Keys */}
       <div className="p-5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-4">
         <div>
-          <h2 className="text-sm font-semibold">PromptPilot Personal API Keys</h2>
+          <h2 className="text-sm font-semibold">PromptEnhancer Personal API Keys</h2>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Use this key in Claude Code, Cursor, terminal, or VS Code to trigger your prompt enhancements.
           </p>

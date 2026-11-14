@@ -68,7 +68,7 @@ export function Layout() {
           <div className="flex items-center gap-6">
             <Link to="/" className="font-semibold tracking-tight text-base flex items-center gap-2">
               <span className="inline-block w-2.5 h-2.5 rounded-sm bg-indigo-500" />
-              PromptPilot
+              PromptEnhancer
             </Link>
             <nav className="flex items-center gap-4 text-sm">
               {navLinks.map((link) => {
@@ -129,7 +129,7 @@ export function Layout() {
 
       <footer className="border-t border-zinc-200 dark:border-zinc-800 py-8 text-xs text-zinc-500 dark:text-zinc-400">
         <div className="mx-auto max-w-6xl px-4 flex flex-wrap items-center justify-between gap-4">
-          <span>PromptPilot — Turn rough ideas into powerful coding prompts.</span>
+          <span>PromptEnhancer — Turn rough ideas into powerful coding prompts.</span>
           <div className="flex items-center gap-4">
             <Link to="/enhance" className="hover:underline">Enhancer</Link>
             <Link to="/install" className="hover:underline">Installation</Link>

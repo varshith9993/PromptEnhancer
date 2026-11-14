@@ -49,8 +49,8 @@ export function hashToken(token: string): string {
 
 export function generatePromptPilotToken(): { token: string; prefix: string; hash: string } {
   const random = crypto.randomBytes(24).toString('hex');
-  const token = `pp_live_${random}`;
-  const prefix = `pp_live_${random.slice(0, 6)}...${random.slice(-4)}`;
+  const token = `pe_live_${random}`;
+  const prefix = `pe_live_${random.slice(0, 6)}...${random.slice(-4)}`;
   const hash = hashToken(token);
   return { token, prefix, hash };
 }

@@ -264,7 +264,7 @@ export function EnhancerPage() {
           throw new Error(data.error ?? 'Account-stored AI call failed. Ensure a healthy key is added in Dashboard.');
         }
         result = data;
-        setDisclaimer('Generated with your account-stored AI key via PromptPilot backend.');
+        setDisclaimer('Generated with your account-stored AI key via PromptEnhancer backend.');
       } else if (mode === 'free') {
         result = enhancePromptRuleBased(req);
       } else {
