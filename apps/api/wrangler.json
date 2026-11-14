@@ -1,5 +1,5 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "promptenhancer",
   "account_id": "265f6dc1546f1ae489096c7260c38fc0",
   "main": "src/worker.ts",
