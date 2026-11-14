@@ -6,7 +6,16 @@ const { url: supabaseUrl, key: supabaseKey } = getSupabaseConfig();
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
 export const supabase: SupabaseClient | null =
-  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+  supabaseUrl && supabaseKey
+    ? createClient(supabaseUrl, supabaseKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true,
+          flowType: 'pkce'
+        }
+      })
+    : null;
 
 export async function signInWithOAuthProvider(provider: 'google' | 'github'): Promise<void> {
   if (!supabase) {
@@ -59,10 +68,23 @@ export async function verifyEmailOtp(email: string, token: string): Promise<void
   if (error) throw error;
 }
 
+export function signInDemoUser(): void {
+  localStorage.setItem('promptenhancer_local_mode_v1', 'true');
+  localStorage.setItem('promptpilot_local_mode_v1', 'true');
+  window.location.href = '/enhance';
+}
+
 export async function signOutUser(): Promise<void> {
-  if (!supabase) return;
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  localStorage.removeItem('promptenhancer_local_mode_v1');
+  localStorage.removeItem('promptpilot_local_mode_v1');
+  if (supabase) {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // ignore
+    }
+  }
+  window.location.href = '/login';
 }
 
 export type AuthSession = Session | null;
