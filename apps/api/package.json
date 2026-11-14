@@ -8,6 +8,9 @@
     "@promptpilot/prompt-engine": "*",
     "@promptpilot/shared": "*"
   },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -17,4 +20,3 @@
     "dev:worker": "wrangler dev"
   }
 }
-
