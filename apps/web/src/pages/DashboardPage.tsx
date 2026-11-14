@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { INTEGRATIONS } from '@promptpilot/config';
 import { BYOK_PROVIDERS, type ByokProviderId } from '@promptpilot/prompt-engine';
 import { supabase, type AuthSession } from '../lib/supabase';
+import { getApiUrl } from '../lib/config';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
+const API_URL = getApiUrl();
 
 interface StoredKey {
   providerId: string;

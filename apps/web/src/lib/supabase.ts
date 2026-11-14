@@ -1,7 +1,7 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseConfig } from './config';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+const { url: supabaseUrl, key: supabaseKey } = getSupabaseConfig();
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
