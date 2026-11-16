@@ -43,6 +43,38 @@ export function decryptApiKey(payload: EncryptedPayload): string {
   return decrypted;
 }
 
+export async function encryptApiKeyAsync(plainText: string): Promise<EncryptedPayload> {
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
+  const rawKey = new Uint8Array(getMasterKey());
+  const key = await globalThis.crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt']);
+  const encoded = new TextEncoder().encode(plainText);
+  const cipherBuf = new Uint8Array(
+    await globalThis.crypto.subtle.encrypt({ name: 'AES-GCM', iv, tagLength: 128 }, key, encoded)
+  );
+  const encryptedBytes = cipherBuf.subarray(0, cipherBuf.length - 16);
+  const authTagBytes = cipherBuf.subarray(cipherBuf.length - 16);
+  return {
+    encrypted: Buffer.from(encryptedBytes).toString('hex'),
+    iv: Buffer.from(iv).toString('hex'),
+    authTag: Buffer.from(authTagBytes).toString('hex')
+  };
+}
+
+export async function decryptApiKeyAsync(payload: EncryptedPayload): Promise<string> {
+  const rawKey = new Uint8Array(getMasterKey());
+  const key = await globalThis.crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt']);
+  const iv = new Uint8Array(Buffer.from(payload.iv, 'hex'));
+  const encryptedBytes = Buffer.from(payload.encrypted, 'hex');
+  const authTagBytes = Buffer.from(payload.authTag, 'hex');
+  const combined = new Uint8Array(Buffer.concat([encryptedBytes, authTagBytes]));
+  const decryptedBuf = await globalThis.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv, tagLength: 128 },
+    key,
+    combined
+  );
+  return new TextDecoder().decode(decryptedBuf);
+}
+
 export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token.trim()).digest('hex');
 }

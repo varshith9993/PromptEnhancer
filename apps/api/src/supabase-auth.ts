@@ -20,8 +20,8 @@ import {
   verifyLocalAccessToken
 } from './db.js';
 import {
-  decryptApiKey,
-  encryptApiKey,
+  decryptApiKeyAsync,
+  encryptApiKeyAsync,
   generatePromptPilotToken,
   hashToken
 } from './crypto.js';
@@ -630,7 +630,7 @@ export async function saveUserApiKey(
     lastError?: string;
   }
 ): Promise<void> {
-  const enc = encryptApiKey(params.apiKey.trim());
+  const enc = await encryptApiKeyAsync(params.apiKey.trim());
   const now = new Date().toISOString();
   const status = params.status ?? 'healthy';
   const username = await ensureUserRow(accessToken, user);
@@ -735,7 +735,7 @@ export async function getUserDecryptedApiKey(
           model_id?: string | null;
         }>;
         if (rows[0]) {
-          const apiKey = decryptApiKey({
+          const apiKey = await decryptApiKeyAsync({
             encrypted: rows[0].encrypted_key,
             iv: rows[0].iv,
             authTag: rows[0].auth_tag
@@ -777,7 +777,7 @@ export async function getUserDefaultHealthyKey(
           model_id?: string | null;
         }>;
         if (rows[0]) {
-          const apiKey = decryptApiKey({
+          const apiKey = await decryptApiKeyAsync({
             encrypted: rows[0].encrypted_key,
             iv: rows[0].iv,
             authTag: rows[0].auth_tag
