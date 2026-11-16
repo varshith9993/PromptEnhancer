@@ -18,7 +18,14 @@ import type {
   TaskCategory,
   UserInstruction
 } from '@promptpilot/shared';
-import { getStoredAuthSession, supabase, type AuthSession } from '../lib/supabase';
+import {
+  AUTH_CHANGE_EVENT,
+  getStoredAuthSession,
+  resolveOAuthCallback,
+  supabase,
+  syncUserSessionWithBackend,
+  type AuthSession
+} from '../lib/supabase';
 import { getApiUrl } from '../lib/config';
 
 const API_URL = getApiUrl();
@@ -106,24 +113,44 @@ export function EnhancerPage() {
       setSession(localSess);
       setMode('account');
     }
+
+    let cancelled = false;
+    void resolveOAuthCallback().then((resolved) => {
+      if (!cancelled && resolved) {
+        setSession(resolved);
+        setMode('account');
+      }
+    });
+
+    const onAuthEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent<AuthSession>).detail;
+      if (detail) {
+        setSession(detail);
+        setMode('account');
+      }
+    };
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthEvent);
+
+    let unsubscribe: (() => void) | undefined;
     if (supabase) {
-      supabase.auth.getSession().then(({ data }) => {
-        if (data.session) {
-          setSession(data.session);
-          setMode('account');
-        }
-      });
       const { data: sub } = supabase.auth.onAuthStateChange((_e, next) => {
         if (next) {
           setSession(next);
           setMode('account');
+          void syncUserSessionWithBackend(next);
         } else if (!getStoredAuthSession()) {
           setSession(null);
           setMode('free');
         }
       });
-      return () => sub.subscription.unsubscribe();
+      unsubscribe = () => sub.subscription.unsubscribe();
     }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthEvent);
+      unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {

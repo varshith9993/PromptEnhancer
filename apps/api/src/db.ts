@@ -103,6 +103,7 @@ function initSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
+      username TEXT UNIQUE,
       display_name TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -110,6 +111,7 @@ function initSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS user_api_keys (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
+      username TEXT,
       provider_id TEXT NOT NULL,
       encrypted_key TEXT NOT NULL,
       iv TEXT NOT NULL,
@@ -169,24 +171,43 @@ function initSchema(db: DatabaseSync): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    INSERT OR IGNORE INTO users (id, email, display_name)
-    VALUES ('local-desktop-user', 'desktop@localhost', 'Local Developer');
+    INSERT OR IGNORE INTO users (id, email, username, display_name)
+    VALUES ('local-desktop-user', 'desktop@localhost', 'desktop_local', 'Local Developer');
   `);
+  try {
+    db.exec('ALTER TABLE users ADD COLUMN username TEXT;');
+  } catch {
+    // column already exists
+  }
+  try {
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username);');
+  } catch {
+    // index already exists
+  }
+  try {
+    db.exec('ALTER TABLE user_api_keys ADD COLUMN username TEXT;');
+  } catch {
+    // column already exists
+  }
 }
 
 // User management
-export function ensureUser(id: string, email: string, displayName?: string): void {
+export function ensureUser(id: string, email: string, displayName?: string, username?: string): void {
   const db = getDatabase();
   if (!db) return;
   db.prepare(`
-    INSERT INTO users (id, email, display_name) VALUES (?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET email = excluded.email, display_name = COALESCE(excluded.display_name, users.display_name)
-  `).run(id, email, displayName || null);
+    INSERT INTO users (id, email, display_name, username) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      email = excluded.email,
+      display_name = COALESCE(excluded.display_name, users.display_name),
+      username = COALESCE(users.username, excluded.username)
+  `).run(id, email, displayName || null, username || null);
 }
 
 // Stored AI Provider Keys
 export function saveEncryptedApiKey(params: {
   userId: string;
+  username?: string | undefined;
   providerId: string;
   apiKey: string;
   baseUrl?: string | undefined;
@@ -204,10 +225,11 @@ export function saveEncryptedApiKey(params: {
 
   db.prepare(`
     INSERT INTO user_api_keys (
-      id, user_id, provider_id, encrypted_key, iv, auth_tag,
+      id, user_id, username, provider_id, encrypted_key, iv, auth_tag,
       base_url, model_id, label, status, enabled, last_checked_at, last_healthy_at, last_error, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(user_id, provider_id) DO UPDATE SET
+      username = COALESCE(excluded.username, user_api_keys.username),
       encrypted_key = excluded.encrypted_key,
       iv = excluded.iv,
       auth_tag = excluded.auth_tag,
@@ -223,6 +245,7 @@ export function saveEncryptedApiKey(params: {
   `).run(
     id,
     params.userId,
+    params.username || null,
     params.providerId,
     enc.encrypted,
     enc.iv,

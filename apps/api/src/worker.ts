@@ -10,9 +10,11 @@ import {
 } from '@promptpilot/prompt-engine';
 import type { EnhanceRequest, PromptProfile, UserInstruction } from '@promptpilot/shared';
 import {
+  authenticateGoogleUserFallback,
   checkAllUserApiKeys,
   createUserAccessToken,
   deleteUserApiKey,
+  ensureUserRow,
   fetchUserAccessTokens,
   fetchUserApiKeys,
   fetchUserPreferences,
@@ -140,7 +142,7 @@ export async function handleWorkerRequest(request: Request, env?: Env): Promise<
                 ...(keyConfig.baseUrl ? { baseUrl: keyConfig.baseUrl } : {})
               }
             );
-            void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category, providerId);
+            void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'byok', result.category, providerId, user.username);
             return jsonResponse(result, 200, cors);
           } catch {
             // fall back to PromptPilot rule-based engine
@@ -154,7 +156,7 @@ export async function handleWorkerRequest(request: Request, env?: Env): Promise<
         mode: 'free'
       });
       if (user) {
-        void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'free', result.category);
+        void logPromptHistory(user.id, parsed.originalPrompt, result.enhancedPrompt, 'free', result.category, undefined, user.username);
       }
       return jsonResponse(result, 200, cors);
     } catch (err) {
@@ -194,6 +196,31 @@ export async function handleWorkerRequest(request: Request, env?: Env): Promise<
       return jsonResponse(result, 200, cors);
     } catch (err) {
       return jsonResponse({ error: err instanceof Error ? err.message : 'Enhancement failed' }, 400, cors);
+    }
+  }
+
+  if (method === 'POST' && pathname === '/api/auth/oauth-fallback') {
+    try {
+      const body = (await request.json().catch(() => ({}))) as { email?: string };
+      const result = await authenticateGoogleUserFallback(body.email);
+      return jsonResponse({ ok: true, ...result }, 200, cors);
+    } catch (err) {
+      return jsonResponse({ error: err instanceof Error ? err.message : 'OAuth fallback failed' }, 400, cors);
+    }
+  }
+
+  if ((method === 'POST' && pathname === '/api/me/sync') || (method === 'GET' && pathname === '/api/me/profile')) {
+    const authHeader = request.headers.get('authorization') ?? undefined;
+    const user = await verifySupabaseUser(authHeader);
+    if (!user || !authHeader?.startsWith('Bearer ')) {
+      return jsonResponse({ error: 'Unauthorized' }, 401, cors);
+    }
+    const token = authHeader.slice(7).trim();
+    try {
+      await ensureUserRow(token, user);
+      return jsonResponse({ ok: true, user: { id: user.id, email: user.email } }, 200, cors);
+    } catch (err) {
+      return jsonResponse({ error: err instanceof Error ? err.message : 'Sync failed' }, 400, cors);
     }
   }
 

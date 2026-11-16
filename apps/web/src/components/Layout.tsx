@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { getStoredAuthSession, signOutUser, supabase, type AuthSession } from '../lib/supabase';
+import {
+  AUTH_CHANGE_EVENT,
+  getStoredAuthSession,
+  resolveOAuthCallback,
+  signOutUser,
+  supabase,
+  syncUserSessionWithBackend,
+  type AuthSession
+} from '../lib/supabase';
 
 export function Layout() {
   const location = useLocation();
@@ -17,23 +25,37 @@ export function Layout() {
       setSession(localSess);
     }
 
-    if (!supabase) return;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (data?.session) {
-        setSession(data.session);
+    let cancelled = false;
+    void resolveOAuthCallback().then((resolved) => {
+      if (!cancelled && resolved) {
+        setSession(resolved);
       }
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (nextSession) {
-        setSession(nextSession);
-      } else if (!getStoredAuthSession()) {
-        setSession(null);
-      }
-    });
+    const onAuthEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent<AuthSession>).detail;
+      setSession(detail ?? getStoredAuthSession());
+    };
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthEvent);
 
-    return () => sub.subscription.unsubscribe();
+    let unsubscribe: (() => void) | undefined;
+    if (supabase) {
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        if (nextSession) {
+          setSession(nextSession);
+          void syncUserSessionWithBackend(nextSession);
+        } else if (!getStoredAuthSession()) {
+          setSession(null);
+        }
+      });
+      unsubscribe = () => sub.subscription.unsubscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthEvent);
+      unsubscribe?.();
+    };
   }, []);
 
   const navLinks = [

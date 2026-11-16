@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
+  AUTH_CHANGE_EVENT,
   getStoredAuthSession,
   isSupabaseConfigured,
+  resolveOAuthCallback,
   signInDemoUser,
   signInWithOAuthProvider,
   signOutUser,
   supabase,
+  syncUserSessionWithBackend,
   type AuthSession
 } from '../lib/supabase';
 
@@ -15,7 +18,6 @@ export function LoginPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    // Parse URL errors from OAuth callbacks (both query string and hash)
     const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const errDesc =
@@ -24,31 +26,54 @@ export function LoginPage() {
       hashParams.get('error_description') ||
       hashParams.get('error');
 
-    if (errDesc) {
-      setError(decodeURIComponent(errDesc.replace(/\+/g, ' ')));
-    }
-
-    if (!supabase) return;
-
-    if (searchParams.has('code') || hashParams.has('access_token')) {
+    if (searchParams.has('code') || hashParams.has('access_token') || errDesc) {
       setBusy('oauth_exchange');
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (data?.session) {
-        setSession(data.session);
+    let cancelled = false;
+    void resolveOAuthCallback().then((resolved) => {
+      if (cancelled) return;
+      if (resolved) {
+        setSession(resolved);
+        setError('');
         setBusy(null);
+        return;
+      }
+      setBusy(null);
+      if (errDesc) {
+        setError(decodeURIComponent(errDesc.replace(/\+/g, ' ')));
       }
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      if (next) {
-        setSession(next);
+    const onAuthEvent = (ev: Event) => {
+      const detail = (ev as CustomEvent<AuthSession>).detail;
+      if (detail) {
+        setSession(detail);
+        setError('');
         setBusy(null);
-        window.location.href = '/enhance';
       }
-    });
-    return () => sub.subscription.unsubscribe();
+    };
+    window.addEventListener(AUTH_CHANGE_EVENT, onAuthEvent);
+
+    let unsubscribe: (() => void) | undefined;
+    if (supabase) {
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+        if (next) {
+          setSession(next);
+          setBusy(null);
+          void syncUserSessionWithBackend(next).finally(() => {
+            window.location.href = '/enhance';
+          });
+        }
+      });
+      unsubscribe = () => sub.subscription.unsubscribe();
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(AUTH_CHANGE_EVENT, onAuthEvent);
+      unsubscribe?.();
+    };
   }, []);
 
   async function handleOAuth(provider: 'google' | 'github') {

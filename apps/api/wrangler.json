@@ -10,6 +10,6 @@
   "vars": {
     "WEB_ORIGIN": "https://promptenhancer-81y.pages.dev",
     "SUPABASE_URL": "https://rctrcehxxgppvateqcrc.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_kYgxarXfmc9RAm5cX1X_Ug_gD6REbT5"
+    "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjdHJjZWh4eGdwcHZhdGVxY3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ1NzI0NTcsImV4cCI6MjExMDE0ODQ1N30.Xqed8JcyAgwWP8rzFjQltQLDw-AMvnlodcoj3cDTpoc"
   }
 }

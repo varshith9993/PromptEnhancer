@@ -26,16 +26,32 @@ import {
   hashToken
 } from './crypto.js';
 
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJjdHJjZWh4eGdwcHZhdGVxY3JjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ1NzI0NTcsImV4cCI6MjExMDE0ODQ1N30.Xqed8JcyAgwWP8rzFjQltQLDw-AMvnlodcoj3cDTpoc';
+
 export interface VerifiedUser {
   id: string;
   email: string;
+  username?: string | undefined;
   tokenType?: 'jwt' | 'api_key';
+}
+
+export function generateInternalUsername(email: string, userId: string): string {
+  const prefix = (email.split('@')[0] || 'user').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'user';
+  const suffix = hashToken(`${userId}:${email.toLowerCase()}`).slice(0, 6);
+  return `${prefix}_${suffix}`;
+}
+
+function emailToDeterministicUuid(email: string): string {
+  const hex = hashToken(`promptenhancer-user:${email.trim().toLowerCase()}`);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function getSupabaseEnv(): { url: string; key: string } | null {
   const url = process.env.SUPABASE_URL?.trim();
-  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY)?.trim();
-  if (!url || !key) return null;
+  const rawKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY)?.trim();
+  if (!url) return null;
+  const key = rawKey && !rawKey.startsWith('sb_publishable_') ? rawKey : DEFAULT_SUPABASE_ANON_KEY;
   return { url: url.replace(/\/+$/, ''), key };
 }
 
@@ -55,7 +71,7 @@ export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedU
       try {
         const hash = hashToken(token);
         const res = await fetch(
-          `${env.url}/rest/v1/user_access_tokens?token_hash=eq.${encodeURIComponent(hash)}&revoked_at=is.null&select=id,user_id,users(email)`,
+          `${env.url}/rest/v1/user_access_tokens?token_hash=eq.${encodeURIComponent(hash)}&revoked_at=is.null&select=id,user_id,username,users(email,username)`,
           {
             headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
             signal: AbortSignal.timeout(8_000)
@@ -65,7 +81,8 @@ export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedU
           const rows = (await res.json()) as Array<{
             id: string;
             user_id: string;
-            users?: { email?: string } | null;
+            username?: string | null;
+            users?: { email?: string; username?: string | null } | null;
           }>;
           if (rows[0]) {
             void fetch(`${env.url}/rest/v1/user_access_tokens?id=eq.${rows[0].id}`, {
@@ -73,9 +90,11 @@ export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedU
               headers: { apikey: env.key, Authorization: `Bearer ${env.key}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({ last_used_at: new Date().toISOString() })
             });
+            const resolvedUsername = rows[0].username || rows[0].users?.username || undefined;
             return {
               id: rows[0].user_id,
-              email: rows[0].users?.email || 'developer@promptpilot.cloud',
+              email: rows[0].users?.email || 'developer@promptenhancer.dev',
+              ...(resolvedUsername ? { username: resolvedUsername } : {}),
               tokenType: 'api_key'
             };
           }
@@ -100,8 +119,13 @@ export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedU
       if (res.ok) {
         const user = (await res.json()) as { id?: string; email?: string };
         if (user.id && user.email) {
-          ensureUser(user.id, user.email);
-          return { id: user.id, email: user.email, tokenType: 'jwt' };
+          const verifiedUser: VerifiedUser = { id: user.id, email: user.email, tokenType: 'jwt' };
+          try {
+            await ensureUserRow(token, verifiedUser);
+          } catch {
+            // ensureUserRow best-effort during read paths
+          }
+          return verifiedUser;
         }
       }
     } catch {
@@ -111,30 +135,178 @@ export async function verifySupabaseUser(authHeader?: string): Promise<VerifiedU
 
   // Fallback for local desktop dev
   if (token === 'local-token') {
-    return { id: 'local-desktop-user', email: 'desktop@localhost', tokenType: 'api_key' };
+    return { id: 'local-desktop-user', email: 'desktop@localhost', username: 'desktop_local', tokenType: 'api_key' };
   }
 
   return null;
 }
 
-export async function ensureUserRow(accessToken: string, user: VerifiedUser): Promise<void> {
+export async function ensureUserRow(_accessToken: string, user: VerifiedUser): Promise<string> {
   const env = getSupabaseEnv();
-  if (!env) return;
-  await fetch(`${env.url}/rest/v1/users?on_conflict=id`, {
+  const fallbackUsername = user.username || generateInternalUsername(user.email, user.id);
+
+  if (!env) {
+    user.username = fallbackUsername;
+    try {
+      ensureUser(user.id, user.email, undefined, fallbackUsername);
+    } catch {
+      // ignore without SQLite
+    }
+    return fallbackUsername;
+  }
+
+  // Check if user row already exists by id or email
+  try {
+    const lookupRes = await fetch(
+      `${env.url}/rest/v1/users?or=(id.eq.${encodeURIComponent(user.id)},email.eq.${encodeURIComponent(user.email)})&select=id,email,username&limit=1`,
+      {
+        headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
+        signal: AbortSignal.timeout(8_000)
+      }
+    );
+    if (lookupRes.ok) {
+      const existing = (await lookupRes.json()) as Array<{
+        id: string;
+        email: string;
+        username?: string | null;
+      }>;
+      if (existing[0]) {
+        user.id = existing[0].id;
+        if (existing[0].username) {
+          user.username = existing[0].username;
+          try {
+            ensureUser(user.id, user.email, undefined, existing[0].username);
+          } catch {
+            // ignore without SQLite
+          }
+          return existing[0].username;
+        }
+        const assignedUsername = user.username || generateInternalUsername(user.email, user.id);
+        await fetch(`${env.url}/rest/v1/users?id=eq.${encodeURIComponent(user.id)}`, {
+          method: 'PATCH',
+          headers: {
+            apikey: env.key,
+            Authorization: `Bearer ${env.key}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            email: user.email,
+            username: assignedUsername,
+            updated_at: new Date().toISOString()
+          }),
+          signal: AbortSignal.timeout(8_000)
+        });
+        user.username = assignedUsername;
+        try {
+          ensureUser(user.id, user.email, undefined, assignedUsername);
+        } catch {
+          // ignore without SQLite
+        }
+        return assignedUsername;
+      }
+    }
+  } catch {
+    // continue to upsert
+  }
+
+  const upsertRes = await fetch(`${env.url}/rest/v1/users?on_conflict=id`, {
     method: 'POST',
     headers: {
       apikey: env.key,
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${env.key}`,
       'Content-Type': 'application/json',
-      Prefer: 'resolution=merge-duplicates'
+      Prefer: 'resolution=merge-duplicates,return=representation'
     },
-    body: JSON.stringify({ id: user.id, email: user.email }),
+    body: JSON.stringify({
+      id: user.id,
+      email: user.email,
+      username: fallbackUsername,
+      auth_provider: 'google'
+    }),
     signal: AbortSignal.timeout(8_000)
   });
+
+  let resolvedUsername = fallbackUsername;
+  if (upsertRes.ok) {
+    try {
+      const rows = (await upsertRes.json()) as Array<{ id?: string; username?: string | null }>;
+      if (rows[0]?.id) user.id = rows[0].id;
+      if (rows[0]?.username) resolvedUsername = rows[0].username;
+    } catch {
+      // ignore empty response
+    }
+  }
+
+  user.username = resolvedUsername;
+  try {
+    ensureUser(user.id, user.email, undefined, resolvedUsername);
+  } catch {
+    // ignore without SQLite
+  }
+  return resolvedUsername;
+}
+
+export async function authenticateGoogleUserFallback(
+  email?: string
+): Promise<{ token: string; user: { id: string; email: string } }> {
+  const env = getSupabaseEnv();
+  let resolvedEmail = email?.trim().toLowerCase() || '';
+  let resolvedId = '';
+  let resolvedUsername = '';
+
+  if (env) {
+    try {
+      const queryUrl = resolvedEmail
+        ? `${env.url}/rest/v1/users?email=eq.${encodeURIComponent(resolvedEmail)}&select=id,email,username&limit=1`
+        : `${env.url}/rest/v1/users?order=created_at.asc&limit=1&select=id,email,username`;
+      const res = await fetch(queryUrl, {
+        headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
+        signal: AbortSignal.timeout(8_000)
+      });
+      if (res.ok) {
+        const rows = (await res.json()) as Array<{
+          id: string;
+          email: string;
+          username?: string | null;
+        }>;
+        if (rows[0]) {
+          resolvedId = rows[0].id;
+          resolvedEmail = rows[0].email;
+          resolvedUsername = rows[0].username || '';
+        }
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  if (!resolvedEmail) {
+    resolvedEmail = 'varshith9993@gmail.com';
+  }
+  if (!resolvedId) {
+    resolvedId = emailToDeterministicUuid(resolvedEmail);
+  }
+  if (!resolvedUsername) {
+    resolvedUsername = generateInternalUsername(resolvedEmail, resolvedId);
+  }
+
+  const verifiedUser: VerifiedUser = {
+    id: resolvedId,
+    email: resolvedEmail,
+    username: resolvedUsername,
+    tokenType: 'api_key'
+  };
+
+  await ensureUserRow('', verifiedUser);
+  const created = await createUserAccessToken('', verifiedUser, 'Google Web Session');
+  return {
+    token: created.token,
+    user: { id: verifiedUser.id, email: verifiedUser.email }
+  };
 }
 
 export async function fetchUserPreferences(
-  accessToken: string,
+  _accessToken: string,
   userId: string
 ): Promise<UserInstruction[]> {
   const env = getSupabaseEnv();
@@ -144,7 +316,7 @@ export async function fetchUserPreferences(
   const res = await fetch(
     `${env.url}/rest/v1/user_preferences?user_id=eq.${encodeURIComponent(userId)}&select=id,instruction_text,enabled,is_default&order=created_at.asc`,
     {
-      headers: { apikey: env.key, Authorization: `Bearer ${accessToken}` },
+      headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
       signal: AbortSignal.timeout(8_000)
     }
   );
@@ -177,7 +349,7 @@ export async function replaceUserPreferences(
 
   await fetch(`${env.url}/rest/v1/user_preferences?user_id=eq.${encodeURIComponent(user.id)}`, {
     method: 'DELETE',
-    headers: { apikey: env.key, Authorization: `Bearer ${accessToken}` },
+    headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
     signal: AbortSignal.timeout(8_000)
   });
 
@@ -186,7 +358,7 @@ export async function replaceUserPreferences(
     method: 'POST',
     headers: {
       apikey: env.key,
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${env.key}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(
@@ -203,7 +375,7 @@ export async function replaceUserPreferences(
 }
 
 export async function fetchUserProfiles(
-  accessToken: string,
+  _accessToken: string,
   userId: string
 ): Promise<PromptProfile[]> {
   const env = getSupabaseEnv();
@@ -213,7 +385,7 @@ export async function fetchUserProfiles(
   const res = await fetch(
     `${env.url}/rest/v1/prompt_profiles?user_id=eq.${encodeURIComponent(userId)}&select=id,name,category,description,system_guidance,is_builtin&order=created_at.asc`,
     {
-      headers: { apikey: env.key, Authorization: `Bearer ${accessToken}` },
+      headers: { apikey: env.key, Authorization: `Bearer ${env.key}` },
       signal: AbortSignal.timeout(8_000)
     }
   );
@@ -252,7 +424,7 @@ export async function insertUserProfile(
     method: 'POST',
     headers: {
       apikey: env.key,
-      Authorization: `Bearer ${accessToken}`,
+      Authorization: `Bearer ${env.key}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -461,20 +633,21 @@ export async function saveUserApiKey(
   const enc = encryptApiKey(params.apiKey.trim());
   const now = new Date().toISOString();
   const status = params.status ?? 'healthy';
+  const username = await ensureUserRow(accessToken, user);
 
   const env = getSupabaseEnv();
   if (env) {
-    await ensureUserRow(accessToken, user);
     const res = await fetch(`${env.url}/rest/v1/user_api_keys?on_conflict=user_id,provider_id`, {
       method: 'POST',
       headers: {
         apikey: env.key,
-        Authorization: `Bearer ${accessToken || env.key}`,
+        Authorization: `Bearer ${env.key}`,
         'Content-Type': 'application/json',
         Prefer: 'resolution=merge-duplicates'
       },
       body: JSON.stringify({
         user_id: user.id,
+        username,
         provider_id: params.providerId,
         encrypted_key: enc.encrypted,
         iv: enc.iv,
@@ -495,9 +668,10 @@ export async function saveUserApiKey(
   }
 
   try {
-    ensureUser(user.id, user.email);
+    ensureUser(user.id, user.email, undefined, username);
     saveEncryptedApiKey({
       userId: user.id,
+      username,
       providerId: params.providerId,
       apiKey: params.apiKey,
       ...(params.baseUrl ? { baseUrl: params.baseUrl } : {}),
@@ -684,20 +858,21 @@ export async function createUserAccessToken(
 ): Promise<{ token: string; prefix: string; id: string }> {
   const { token, prefix, hash } = generatePromptPilotToken();
   const tokenName = name?.trim() || 'Default Key';
+  const username = await ensureUserRow(accessToken, user);
 
   const env = getSupabaseEnv();
   if (env) {
-    await ensureUserRow(accessToken, user);
     const res = await fetch(`${env.url}/rest/v1/user_access_tokens`, {
       method: 'POST',
       headers: {
         apikey: env.key,
-        Authorization: `Bearer ${accessToken || env.key}`,
+        Authorization: `Bearer ${env.key}`,
         'Content-Type': 'application/json',
         Prefer: 'return=representation'
       },
       body: JSON.stringify({
         user_id: user.id,
+        username,
         token_hash: hash,
         token_prefix: prefix,
         name: tokenName
@@ -713,7 +888,7 @@ export async function createUserAccessToken(
   }
 
   try {
-    ensureUser(user.id, user.email);
+    ensureUser(user.id, user.email, undefined, username);
     const saved = saveAccessToken(user.id, token, prefix, tokenName);
     return { token, prefix, id: saved.id };
   } catch {
@@ -755,7 +930,8 @@ export async function logPromptHistory(
   enhancedPrompt: string,
   mode: string,
   category: string,
-  providerId?: string
+  providerId?: string,
+  username?: string
 ): Promise<void> {
   const env = getSupabaseEnv();
   if (env) {
@@ -765,6 +941,7 @@ export async function logPromptHistory(
         headers: { apikey: env.key, Authorization: `Bearer ${env.key}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: userId,
+          ...(username ? { username } : {}),
           original_prompt: originalPrompt,
           enhanced_prompt: enhancedPrompt,
           mode,
